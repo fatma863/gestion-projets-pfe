@@ -1,0 +1,26 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# React
+react/node_modules/
+react/dist/
+react/.env.local
+react/.env.production
+
+# Laravel
+laravel/vendor/
+laravel/node_modules/
+laravel/.env
+laravel/storage/*.key
+laravel/storage/logs/
+laravel/bootstrap/cache/
+
+# Misc
+.qodo/
