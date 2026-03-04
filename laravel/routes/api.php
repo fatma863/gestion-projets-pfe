@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\AiController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GanttController;
 use App\Http\Controllers\Api\NotificationController;
@@ -86,4 +87,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('notifications', [NotificationController::class, 'index']);
     Route::patch('notifications/{notification}/read', [NotificationController::class, 'markAsRead']);
     Route::post('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+
+    // IA Services
+    Route::prefix('ai')->group(function () {
+        Route::get('estimate/{task}', [AiController::class, 'estimateTask']);
+        Route::get('delay-risk/task/{task}', [AiController::class, 'delayRiskTask']);
+        Route::get('delay-risk/project/{project}', [AiController::class, 'delayRiskProject']);
+        Route::get('suggest-assignment/{task}', [AiController::class, 'suggestAssignment']);
+        Route::get('optimize-assignments/{project}', [AiController::class, 'optimizeProjectAssignments']);
+    });
 });
