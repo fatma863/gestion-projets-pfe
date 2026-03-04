@@ -1,8 +1,8 @@
 import { useAuth } from '../../contexts/AuthContext';
-import { Bell, LogOut, User } from 'lucide-react';
+import { Bell, LogOut, User, Menu } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-export default function Topbar() {
+export default function Topbar({ onMenuClick }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -12,9 +12,15 @@ export default function Topbar() {
   };
 
   return (
-    <header className="flex h-16 items-center justify-between border-b border-border bg-white px-6">
-      <div>
-        <h2 className="text-lg font-semibold text-foreground">
+    <header className="flex h-16 items-center justify-between border-b border-border bg-white px-4 sm:px-6">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onMenuClick}
+          className="rounded-md p-2 hover:bg-accent transition-colors lg:hidden"
+        >
+          <Menu size={20} className="text-muted-foreground" />
+        </button>
+        <h2 className="text-base sm:text-lg font-semibold text-foreground">
           Gestion des Projets PFE
         </h2>
       </div>

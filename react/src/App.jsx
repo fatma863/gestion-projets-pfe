@@ -3,6 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute, GuestRoute } from './routes/guards';
 import AppLayout from './components/layout/AppLayout';
+import LandingPage from './pages/landing/LandingPage';
+import NotFoundPage from './pages/NotFoundPage';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
@@ -31,13 +33,16 @@ function App() {
       <BrowserRouter>
         <AuthProvider>
           <Routes>
+            {/* Landing */}
+            <Route path="/" element={<GuestRoute><LandingPage /></GuestRoute>} />
+
             {/* Guest routes */}
             <Route path="/login" element={<GuestRoute><LoginPage /></GuestRoute>} />
             <Route path="/register" element={<GuestRoute><RegisterPage /></GuestRoute>} />
 
             {/* Protected routes */}
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-              <Route path="/dashboard" element={<DashboardPage />} />
+              <Route index path="/dashboard" element={<DashboardPage />} />
               <Route path="/projects" element={<ProjectsPage />} />
               <Route path="/projects/:id" element={<ProjectDetailPage />} />
               <Route path="/teams" element={<TeamsPage />} />
@@ -48,9 +53,8 @@ function App() {
               <Route path="/settings" element={<SettingsPage />} />
             </Route>
 
-            {/* Redirect */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            {/* 404 */}
+            <Route path="*" element={<NotFoundPage />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>
