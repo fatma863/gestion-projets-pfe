@@ -6,6 +6,14 @@ import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/auth/LoginPage';
 import RegisterPage from './pages/auth/RegisterPage';
 import DashboardPage from './pages/dashboard/DashboardPage';
+import ProjectsPage from './pages/projects/ProjectsPage';
+import ProjectDetailPage from './pages/projects/ProjectDetailPage';
+import TeamsPage from './pages/teams/TeamsPage';
+import TeamDetailPage from './pages/teams/TeamDetailPage';
+import GanttPage from './pages/gantt/GanttPage';
+import AiPage from './pages/ai/AiPage';
+import NotificationsPage from './pages/notifications/NotificationsPage';
+import SettingsPage from './pages/settings/SettingsPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -30,12 +38,14 @@ function App() {
             {/* Protected routes */}
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/projects" element={<Placeholder title="Projets" />} />
-              <Route path="/teams" element={<Placeholder title="Équipes" />} />
-              <Route path="/gantt" element={<Placeholder title="Diagramme de Gantt" />} />
-              <Route path="/ai" element={<Placeholder title="IA & Analytics" />} />
-              <Route path="/notifications" element={<Placeholder title="Notifications" />} />
-              <Route path="/settings" element={<Placeholder title="Paramètres" />} />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/projects/:id" element={<ProjectDetailPage />} />
+              <Route path="/teams" element={<TeamsPage />} />
+              <Route path="/teams/:id" element={<TeamDetailPage />} />
+              <Route path="/gantt" element={<GanttPage />} />
+              <Route path="/ai" element={<AiPage />} />
+              <Route path="/notifications" element={<NotificationsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
             </Route>
 
             {/* Redirect */}
@@ -45,17 +55,6 @@ function App() {
         </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
-  );
-}
-
-function Placeholder({ title }) {
-  return (
-    <div className="flex items-center justify-center py-20">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold text-foreground">{title}</h2>
-        <p className="mt-2 text-muted-foreground">Cette page sera implémentée dans l'étape suivante.</p>
-      </div>
-    </div>
   );
 }
 
