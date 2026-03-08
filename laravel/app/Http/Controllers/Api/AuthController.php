@@ -24,6 +24,7 @@ class AuthController extends Controller
         ]);
 
         $user->assignRole('member');
+        $user->load('roles', 'permissions');
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
@@ -44,6 +45,7 @@ class AuthController extends Controller
 
         $user = Auth::user();
         $user->tokens()->delete();
+        $user->load('roles', 'permissions');
         $token = $user->createToken('auth-token')->plainTextToken;
 
         return response()->json([

@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
+import { useCreateTask, useUpdateTask, useDeleteTask } from '../../hooks/useTasks';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -19,73 +23,124 @@ const PRIORITY_OPTIONS = [
   { value: 'urgent', label: 'Urgente' },
 ];
 
-const EMPTY_FORM = {
-  title: '', description: '', status_id: '', priority: 'medium',
-  complexity: 5, planned_start: '', planned_end: '', due_date: '',
-  estimated_hours: '', progress_percent: 0,
-};
+// Helper: coerce to number but treat empty string as null
+const optionalNumber = z.preprocess(
+  (val) => (val === '' || val === undefined ? null : val),
+  z.coerce.number().min(0).nullable().optional()
+);
+
+const taskSchema = z.object({
+  title: z.string().min(1, 'Le titre est obligatoire').max(255),
+  description: z.string().optional().default(''),
+  status_id: z.coerce.number().min(1, 'Le statut est obligatoire'),
+  priority: z.enum(['low', 'medium', 'high', 'urgent']).default('medium'),
+  complexity: z.coerce.number().min(1).max(10).optional().default(5),
+  story_points: optionalNumber,
+  planned_start: z.string().optional().default(''),
+  planned_end: z.string().optional().default(''),
+  due_date: z.string().optional().default(''),
+  estimated_hours: optionalNumber,
+  progress_percent: z.coerce.number().min(0).max(100).optional().default(0),
+  parent_id: z.preprocess(
+    (val) => (val === '' || val === undefined ? null : val),
+    z.coerce.number().nullable().optional()
+  ),
+});
 
 export default function TaskModal({ open, onClose, projectId, task, defaultStatusId, statuses }) {
-  const queryClient = useQueryClient();
   const isEdit = !!task;
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [errors, setErrors] = useState({});
   const [activeTab, setActiveTab] = useState('details');
+  const [serverErrors, setServerErrors] = useState({});
+
+  const createMutation = useCreateTask(projectId);
+  const updateMutation = useUpdateTask(projectId);
+  const deleteMutation = useDeleteTask(projectId);
+
+  const { data: allTasks } = useQuery({
+    queryKey: ['tasks', String(projectId)],
+    queryFn: () => api.get(`/projects/${projectId}/tasks?all=1`).then((r) => r.data.tasks ?? r.data.data ?? r.data),
+    enabled: open && !!projectId,
+  });
+
+  const parentOptions = (allTasks || []).filter((t) => t.id !== task?.id);
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm({
+    resolver: zodResolver(taskSchema),
+    defaultValues: {
+      title: '', description: '', status_id: '', priority: 'medium',
+      complexity: 5, story_points: null, planned_start: '', planned_end: '',
+      due_date: '', estimated_hours: null, progress_percent: 0, parent_id: null,
+    },
+  });
 
   useEffect(() => {
     if (open) {
       if (task) {
-        setForm({
+        reset({
           title: task.title || '',
           description: task.description || '',
           status_id: task.status_id || '',
           priority: task.priority || 'medium',
           complexity: task.complexity || 5,
+          story_points: task.story_points ?? null,
           planned_start: task.planned_start || '',
           planned_end: task.planned_end || '',
           due_date: task.due_date || '',
-          estimated_hours: task.estimated_hours || '',
+          estimated_hours: task.estimated_hours ?? null,
           progress_percent: task.progress_percent || 0,
+          parent_id: task.parent_id ?? null,
         });
       } else {
-        setForm({ ...EMPTY_FORM, status_id: defaultStatusId || '' });
+        reset({
+          title: '', description: '', status_id: defaultStatusId || '',
+          priority: 'medium', complexity: 5, story_points: null,
+          planned_start: '', planned_end: '', due_date: '',
+          estimated_hours: null, progress_percent: 0, parent_id: null,
+        });
       }
-      setErrors({});
+      setServerErrors({});
       setActiveTab('details');
     }
-  }, [open, task, defaultStatusId]);
+  }, [open, task, defaultStatusId, reset]);
 
-  const saveMutation = useMutation({
-    mutationFn: (data) =>
-      isEdit ? api.put(`/tasks/${task.id}`, data) : api.post(`/projects/${projectId}/tasks`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks', String(projectId)] });
-      onClose();
-    },
-    onError: (err) => {
-      if (err.response?.status === 422) setErrors(err.response.data.errors || {});
-    },
-  });
+  const onSubmit = (formData) => {
+    const payload = { ...formData };
+    // Clean empty optional fields
+    ['planned_start', 'planned_end', 'due_date'].forEach((f) => {
+      if (!payload[f]) delete payload[f];
+    });
+    if (!payload.estimated_hours && payload.estimated_hours !== 0) delete payload.estimated_hours;
+    if (!payload.story_points && payload.story_points !== 0) delete payload.story_points;
+    if (!payload.parent_id) delete payload.parent_id;
 
-  const deleteMutation = useMutation({
-    mutationFn: () => api.delete(`/tasks/${task.id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tasks', String(projectId)] });
-      onClose();
-    },
-  });
+    const mutation = isEdit ? updateMutation : createMutation;
+    const mutateArg = isEdit ? { taskId: task.id, data: payload } : payload;
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const payload = { ...form };
-    if (!payload.planned_start) delete payload.planned_start;
-    if (!payload.planned_end) delete payload.planned_end;
-    if (!payload.due_date) delete payload.due_date;
-    if (!payload.estimated_hours) delete payload.estimated_hours;
-    saveMutation.mutate(payload);
+    mutation.mutate(mutateArg, {
+      onSuccess: () => onClose(),
+      onError: (err) => {
+        if (err.response?.status === 422) setServerErrors(err.response.data.errors || {});
+      },
+    });
   };
 
-  const set = (field, value) => setForm((f) => ({ ...f, [field]: value }));
+  const handleDelete = () => {
+    if (window.confirm('Supprimer cette tâche ?')) {
+      deleteMutation.mutate(task.id, { onSuccess: () => onClose() });
+    }
+  };
+
+  const fieldError = (name) => {
+    const client = errors[name]?.message;
+    const server = serverErrors[name]?.[0];
+    return client || server;
+  };
 
   return (
     <Modal
@@ -120,77 +175,87 @@ export default function TaskModal({ open, onClose, projectId, task, defaultStatu
       </div>
 
       {activeTab === 'details' && (
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <label className="mb-1 block text-sm font-medium">Titre *</label>
-            <Input value={form.title} onChange={(e) => set('title', e.target.value)} />
-            {errors.title && <p className="mt-1 text-xs text-destructive">{errors.title[0]}</p>}
+            <Input {...register('title')} />
+            {fieldError('title') && <p className="mt-1 text-xs text-destructive">{fieldError('title')}</p>}
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Description</label>
-            <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={3} />
+            <Textarea {...register('description')} rows={3} />
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
               <label className="mb-1 block text-sm font-medium">Statut *</label>
-              <Select value={form.status_id} onChange={(e) => set('status_id', Number(e.target.value))}>
+              <Select {...register('status_id')}>
                 <option value="">Choisir...</option>
                 {statuses.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </Select>
+              {fieldError('status_id') && <p className="mt-1 text-xs text-destructive">{fieldError('status_id')}</p>}
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Priorité</label>
-              <Select value={form.priority} onChange={(e) => set('priority', e.target.value)}>
+              <Select {...register('priority')}>
                 {PRIORITY_OPTIONS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
               </Select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium">Complexité (1-10)</label>
-              <Input type="number" min={1} max={10} value={form.complexity} onChange={(e) => set('complexity', Number(e.target.value))} />
+              <Input type="number" min={1} max={10} {...register('complexity')} />
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm font-medium">Début planifié</label>
-              <Input type="date" value={form.planned_start} onChange={(e) => set('planned_start', e.target.value)} />
+              <label className="mb-1 block text-sm font-medium">Story Points</label>
+              <Input type="number" min={0} {...register('story_points')} />
             </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Fin planifiée</label>
-              <Input type="date" value={form.planned_end} onChange={(e) => set('planned_end', e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium">Échéance</label>
-              <Input type="date" value={form.due_date} onChange={(e) => set('due_date', e.target.value)} />
-            </div>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-1 block text-sm font-medium">Heures estimées</label>
-              <Input type="number" step="0.5" value={form.estimated_hours} onChange={(e) => set('estimated_hours', e.target.value)} />
+              <Input type="number" step="0.5" min={0} {...register('estimated_hours')} />
             </div>
             {isEdit && (
               <div>
                 <label className="mb-1 block text-sm font-medium">Progression (%)</label>
-                <Input type="number" min={0} max={100} value={form.progress_percent} onChange={(e) => set('progress_percent', Number(e.target.value))} />
+                <Input type="number" min={0} max={100} {...register('progress_percent')} />
               </div>
             )}
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <label className="mb-1 block text-sm font-medium">Début planifié</label>
+              <Input type="date" {...register('planned_start')} />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Fin planifiée</label>
+              <Input type="date" {...register('planned_end')} />
+              {fieldError('planned_end') && <p className="mt-1 text-xs text-destructive">{fieldError('planned_end')}</p>}
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium">Échéance</label>
+              <Input type="date" {...register('due_date')} />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium">Tâche parente</label>
+            <Select {...register('parent_id')}>
+              <option value="">Aucune (tâche racine)</option>
+              {parentOptions.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </Select>
+            {fieldError('parent_id') && <p className="mt-1 text-xs text-destructive">{fieldError('parent_id')}</p>}
           </div>
           <div className="flex items-center justify-between pt-2">
             <div>
               {isEdit && (
-                <Button
-                  type="button"
-                  variant="destructive"
-                  onClick={() => { if (window.confirm('Supprimer cette tâche ?')) deleteMutation.mutate(); }}
-                >
+                <Button type="button" variant="destructive" onClick={handleDelete}>
                   <Trash2 className="mr-1 h-4 w-4" /> Supprimer
                 </Button>
               )}
             </div>
             <div className="flex gap-3">
               <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-              <Button type="submit" disabled={saveMutation.isPending}>
-                {saveMutation.isPending ? 'Enregistrement...' : isEdit ? 'Modifier' : 'Créer'}
+              <Button type="submit" disabled={isSubmitting || createMutation.isPending || updateMutation.isPending}>
+                {(createMutation.isPending || updateMutation.isPending) ? 'Enregistrement...' : isEdit ? 'Modifier' : 'Créer'}
               </Button>
             </div>
           </div>
@@ -210,7 +275,7 @@ function CommentsTab({ taskId }) {
 
   const { data: comments, isLoading } = useQuery({
     queryKey: ['comments', taskId],
-    queryFn: () => api.get(`/tasks/${taskId}/comments`).then((r) => r.data.data),
+    queryFn: () => api.get(`/tasks/${taskId}/comments`).then((r) => r.data.comments),
   });
 
   const addMutation = useMutation({
@@ -281,7 +346,7 @@ function TimeEntriesTab({ taskId }) {
 
   const { data: entries, isLoading } = useQuery({
     queryKey: ['time-entries', taskId],
-    queryFn: () => api.get(`/tasks/${taskId}/time-entries`).then((r) => r.data.data),
+    queryFn: () => api.get(`/tasks/${taskId}/time-entries`).then((r) => r.data.time_entries),
   });
 
   const addMutation = useMutation({
@@ -355,7 +420,7 @@ function AssigneesTab({ taskId }) {
 
   const { data: assignees, isLoading } = useQuery({
     queryKey: ['assignees', taskId],
-    queryFn: () => api.get(`/tasks/${taskId}/assignees`).then((r) => r.data.data),
+    queryFn: () => api.get(`/tasks/${taskId}/assignees`).then((r) => r.data.assignees),
   });
 
   const assignMutation = useMutation({

@@ -1,0 +1,128 @@
+import { useAuth } from '../../contexts/AuthContext';
+import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import api from '../../lib/api';
+import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
+import { Badge } from '../../components/ui/Badge';
+import { Spinner } from '../../components/ui/Spinner';
+import { MetricCard } from '../../components/ui/MetricCard';
+import { ProgressBar } from '../../components/ui/ProgressBar';
+import { EmptyState } from '../../components/ui/EmptyState';
+import { PageHeader } from '../../components/ui/PageHeader';
+import { ReadOnlyBanner } from '../../components/shared/ReadOnlyBanner';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts';
+import { motion } from 'framer-motion';
+import {
+  FolderKanban, CheckCircle2, AlertTriangle, TrendingUp, Users,
+  ArrowRight, ListTodo, Clock,
+} from 'lucide-react';
+
+const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+const STATUS_LABELS = { active: 'Actif', planning: 'Planification', on_hold: 'En pause', completed: 'Terminé', cancelled: 'Annulé' };
+const STATUS_VARIANTS = { active: 'success', planning: 'warning', on_hold: 'secondary', completed: 'default', cancelled: 'destructive' };
+
+export default function ViewerDashboardPage() {
+  const { user } = useAuth();
+
+  const { data: projects, isLoading } = useQuery({ queryKey: ['projects'], queryFn: () => api.get('/projects').then((r) => r.data.data) });
+  const { data: tasks } = useQuery({ queryKey: ['dashboard-tasks'], queryFn: () => api.get('/tasks').then((r) => r.data.tasks).catch(() => []) });
+
+  if (isLoading) return <div className="flex items-center justify-center py-20"><Spinner size="lg" /></div>;
+
+  const totalTasks = tasks?.length || 0;
+  const completedTasks = tasks?.filter((t) => ['done', 'terminé'].includes(t.status?.name?.toLowerCase())) || [];
+  const overdueTasks = tasks?.filter((t) => {
+    const isDone = ['done', 'terminé'].includes(t.status?.name?.toLowerCase());
+    return !isDone && t.due_date && new Date(t.due_date) < new Date();
+  }) || [];
+  const completionRate = totalTasks > 0 ? Math.round((completedTasks.length / totalTasks) * 100) : 0;
+
+  const statusCounts = {};
+  tasks?.forEach((t) => { const name = t.status?.name || 'Sans statut'; statusCounts[name] = (statusCounts[name] || 0) + 1; });
+  const pieData = Object.entries(statusCounts).map(([name, value]) => ({ name, value }));
+
+  return (
+    <div className="space-y-6">
+      <ReadOnlyBanner />
+      <PageHeader title={`Bonjour, ${user?.name}`} description="Tableau de bord en consultation" />
+
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <MetricCard icon={FolderKanban} label="Projets" value={projects?.length || 0} color="bg-blue-50 text-blue-600" />
+        <MetricCard icon={ListTodo} label="Tâches" value={totalTasks} sub={`${completedTasks.length} terminées`} color="bg-emerald-50 text-emerald-600" />
+        <MetricCard icon={AlertTriangle} label="En retard" value={overdueTasks.length} color={overdueTasks.length > 0 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'} />
+        <MetricCard icon={TrendingUp} label="Complétion" value={`${completionRate}%`} color="bg-purple-50 text-purple-600" />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        {pieData.length > 0 && (
+          <Card>
+            <CardHeader><CardTitle>Répartition des tâches</CardTitle></CardHeader>
+            <CardContent>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart><Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">{pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie><RTooltip formatter={(v, n) => [`${v} tâches`, n]} /></PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-3 justify-center">
+                {pieData.map((d, i) => <div key={d.name} className="flex items-center gap-1.5 text-xs text-muted-foreground"><div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[i % COLORS.length] }} />{d.name} ({d.value})</div>)}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className={overdueTasks.length > 0 ? 'lg:col-span-2 border-red-200/50' : 'lg:col-span-2'}>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2">
+              <AlertTriangle size={16} className={overdueTasks.length > 0 ? 'text-red-500' : 'text-muted-foreground'} /> Tâches en retard
+              {overdueTasks.length > 0 && <Badge variant="destructive" className="ml-auto">{overdueTasks.length}</Badge>}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {overdueTasks.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">Aucune tâche en retard</p>
+            ) : (
+              <div className="space-y-2">
+                {overdueTasks.slice(0, 5).map((task) => (
+                  <div key={task.id} className="flex items-center justify-between rounded-lg bg-red-50/50 px-3 py-2.5 text-sm">
+                    <span className="font-medium text-foreground">{task.title}</span>
+                    <span className="text-xs text-red-600 flex items-center gap-1"><Clock size={12} />{new Date(task.due_date).toLocaleDateString('fr-FR')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-foreground">Projets</h2>
+          <Link to="/app/projects" className="flex items-center gap-1 text-sm text-primary hover:text-primary/80 font-medium">Voir tout <ArrowRight size={14} /></Link>
+        </div>
+        {projects?.length === 0 ? (
+          <EmptyState icon={FolderKanban} title="Aucun projet" description="Aucun projet disponible" />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {projects?.slice(0, 6).map((project, i) => (
+              <motion.div key={project.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, delay: i * 0.05 }}>
+                <Link to={`/app/projects/${project.id}`}>
+                  <Card hover className="cursor-pointer h-full">
+                    <CardHeader className="pb-3"><div className="flex items-center justify-between"><CardTitle className="text-sm truncate mr-2">{project.name}</CardTitle><Badge variant={STATUS_VARIANTS[project.status] || 'outline'} dot>{STATUS_LABELS[project.status] || project.status}</Badge></div></CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-muted-foreground line-clamp-2 mb-3">{project.description || 'Aucune description'}</p>
+                      <ProgressBar value={project.progress_percent || 0} size="sm" showValue className="mb-3" />
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        {project.tasks_count !== undefined && <span className="flex items-center gap-1"><CheckCircle2 size={13} />{project.tasks_count} tâches</span>}
+                        {project.members_count !== undefined && <span className="flex items-center gap-1"><Users size={13} />{project.members_count} membres</span>}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

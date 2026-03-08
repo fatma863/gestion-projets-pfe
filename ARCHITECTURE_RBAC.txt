@@ -1,0 +1,1394 @@
+================================================================================
+   ARCHITECTURE RBAC — SÉPARATION DES ESPACES UTILISATEURS
+   Gestion de Projets PFE — Fatma Rejeb
+   Date : Juin 2025
+================================================================================
+
+TABLE DES MATIÈRES
+──────────────────
+ 1. Diagnostic de l'existant
+ 2. Architecture cible recommandée
+ 3. Modèle de rôles recommandé
+ 4. Matrice de permissions
+ 5. Règles métier d'autorisation
+ 6. Séparation backend (Laravel)
+ 7. Séparation frontend (React)
+ 8. Visibilité des données par rôle
+ 9. Sécurisation des endpoints IA
+10. Arborescence finale des espaces
+11. Plan de refactorisation
+12. Bonnes pratiques et pièges à éviter
+
+
+================================================================================
+ 1.  DIAGNOSTIC DE L'EXISTANT
+================================================================================
+
+1.1  Rôles Spatie actuels
+─────────────────────────
+Quatre rôles globaux via Spatie Permission 6.x :
+
+  ┌──────────┬──────────────────────────────────────────────────────────────┐
+  │ Rôle     │ Permissions                                                 │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ admin    │ manage-users, manage-teams, manage-projects,                │
+  │          │ manage-all-projects, view-projects, manage-tasks,           │
+  │          │ view-tasks, manage-time-entries, view-reports,              │
+  │          │ use-ai-features  (10/10)                                    │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ manager  │ manage-teams, manage-projects, view-projects,              │
+  │          │ manage-tasks, view-tasks, manage-time-entries,             │
+  │          │ view-reports, use-ai-features  (8/10)                      │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ member   │ view-projects, manage-tasks, view-tasks,                   │
+  │          │ manage-time-entries, view-reports, use-ai-features  (6/10) │
+  ├──────────┼──────────────────────────────────────────────────────────────┤
+  │ viewer   │ view-projects, view-tasks, view-reports  (3/10)            │
+  └──────────┴──────────────────────────────────────────────────────────────┘
+
+1.2  Rôles contextuels (pivot)
+──────────────────────────────
+En parallèle, deux systèmes de rôles par contexte :
+
+  • Table project_members :  project_role ∈ {owner, manager, developer, designer,
+                             tester, viewer}
+  • Table team_user :        role_in_team ∈ {lead, manager, developer, designer,
+                             tester, member}
+
+Ces rôles pivot sont utilisés dans les Policies (ProjectPolicy, TaskPolicy)
+pour déterminer les droits d'édition/suppression au sein d'un projet.
+
+1.3  Policies existantes
+────────────────────────
+Deux policies enregistrées dans AppServiceProvider via Gate::policy() :
+
+  ┌────────────────┬──────────────────────────────────────────────────────┐
+  │ ProjectPolicy  │                                                      │
+  ├────────────────┼──────────────────────────────────────────────────────┤
+  │ viewAny        │ return true (toujours autorisé)                     │
+  │ view           │ admin OU membre du projet OU owner                  │
+  │ create         │ permission manage-projects                          │
+  │ update         │ admin OU manage-all-projects OU project_role        │
+  │                │ ∈ {owner, manager} OU owner_id == user              │
+  │ delete         │ admin OU owner_id == user                           │
+  └────────────────┴──────────────────────────────────────────────────────┘
+
+  ┌────────────────┬──────────────────────────────────────────────────────┐
+  │ TaskPolicy     │                                                      │
+  ├────────────────┼──────────────────────────────────────────────────────┤
+  │ view           │ admin OU membre du projet                           │
+  │ create         │ permission manage-tasks                             │
+  │ update         │ admin OU (membre ET (project_role owner/manager     │
+  │                │ OU assigné OU créateur))                            │
+  │ delete         │ admin OU project_role owner/manager OU créateur     │
+  └────────────────┴──────────────────────────────────────────────────────┘
+
+1.4  Middleware et routes
+─────────────────────────
+CONSTAT CRITIQUE : Il n'existe AUCUN middleware basé sur les rôles.
+
+  Fichier routes/api.php :
+    → Toutes les routes (Teams, Projects, Tasks, Statuses, Gantt,
+      Notifications, IA) sont dans un seul groupe middleware('auth:sanctum').
+    → Aucun usage de middleware role:admin, permission:manage-users, etc.
+
+  Fichier bootstrap/app.php :
+    → withMiddleware() est vide — aucun middleware personnalisé n'est registré.
+
+  Conséquence : Un utilisateur authentifié avec le rôle « viewer » peut
+  théoriquement envoyer des requêtes POST/PUT/DELETE vers n'importe quel
+  endpoint. Seules les Policies (quand elles sont invoquées via
+  Gate::authorize) offrent une protection partielle.
+
+1.5  Frontend — absence de séparation
+──────────────────────────────────────
+  • App.jsx : Un seul <AppLayout> wrappé dans <ProtectedRoute>
+    → Même layout, même sidebar, mêmes routes pour tous les rôles.
+  • Sidebar.jsx : Un tableau navItems statique identique pour tous.
+    → Aucun filtrage par rôle ou permission.
+  • guards.jsx : ProtectedRoute ne vérifie que user !== null.
+    → Aucun RoleRoute, PermissionRoute, ou guard conditionnel.
+  • AuthContext.jsx : Reçoit user avec roles[] et permissions[] via /me,
+    mais ces données ne sont jamais exploitées pour le routing.
+
+1.6  Failles identifiées
+─────────────────────────
+  F1 — Aucun middleware de rôle sur les routes API
+  F2 — Endpoints sensibles (manage-users, IA) accessibles à tout authentifié
+  F3 — viewAny retourne true → tout le monde peut lister les projets
+  F4 — TaskController.index ne filtre pas les tâches par membership
+  F5 — Aucune séparation d'interface → un viewer voit les mêmes menus qu'un admin
+  F6 — Endpoints Teams (CRUD) accessibles sans vérification manage-teams
+  F7 — Pas de TeamPolicy → aucun contrôle au niveau Gate sur les équipes
+  F8 — Double système de rôles (global Spatie + pivot contextuel) non harmonisé
+
+
+================================================================================
+ 2.  ARCHITECTURE CIBLE RECOMMANDÉE
+================================================================================
+
+2.1  Principe directeur
+───────────────────────
+Adopter une architecture à TROIS ESPACES distincts, chacun correspondant à un
+rôle global Spatie, avec un layout, un sidebar et un sous-arbre de routes dédié :
+
+  ┌───────────────────────────────────────────────────────────────────────────┐
+  │                         ESPACE ADMIN (/admin/*)                          │
+  │  Rôle : admin                                                            │
+  │  Accès : supervision globale, gestion utilisateurs, équipes, tous        │
+  │          projets, toutes tâches, analytics IA complets, logs système     │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │                       ESPACE MANAGER (/manager/*)                        │
+  │  Rôle : manager                                                          │
+  │  Accès : gestion de ses équipes/projets, Gantt, IA prédictive,          │
+  │          rapports de ses projets, gestion des membres de projet          │
+  ├───────────────────────────────────────────────────────────────────────────┤
+  │                       ESPACE MEMBRE (/app/*)                             │
+  │  Rôles : member, viewer                                                  │
+  │  Accès : dashboard personnel, projets assignés, tâches assignées,       │
+  │          commentaires, time tracking, notifications personnelles         │
+  └───────────────────────────────────────────────────────────────────────────┘
+
+2.2  Schéma d'architecture — défense en profondeur
+───────────────────────────────────────────────────
+
+  Requête HTTP  →  Middleware auth:sanctum
+                   │
+                   ├→ Middleware role:admin  →  Routes /admin/*  → Controller → Policy
+                   ├→ Middleware role:manager → Routes /manager/* → Controller → Policy
+                   └→ (aucun role middleware)→  Routes /app/*     → Controller → Policy
+
+  Trois couches de protection :
+    1. Middleware de rôle  → filtre par rôle global avant d'atteindre le contrôleur
+    2. Controller          → peut vérifier des permissions Spatie supplémentaires
+    3. Policy/Gate         → vérifie l'accès contextuel (membership, ownership)
+
+2.3  Redirections après login
+─────────────────────────────
+  • admin   → /admin/dashboard
+  • manager → /manager/dashboard
+  • member  → /app/dashboard
+  • viewer  → /app/dashboard (mêmes routes mais actions d'écriture masquées)
+
+  Le frontend redirige automatiquement après login selon user.roles[0].
+
+
+================================================================================
+ 3.  MODÈLE DE RÔLES RECOMMANDÉ
+================================================================================
+
+3.1  Rôles globaux Spatie (inchangés, 4 rôles)
+───────────────────────────────────────────────
+  • admin   — Superutilisateur, accès total, gestion plateforme
+  • manager — Gestionnaire de projets/équipes, accès avancé
+  • member  — Contributeur, accès limité à ses projets/tâches
+  • viewer  — Observateur, lecture seule
+
+  Note : Le rôle « viewer » partage l'espace /app/* avec « member » mais
+  avec des restrictions d'écriture. Cela évite un 4ème espace inutile.
+
+3.2  Rôles contextuels projet (inchangés, table project_members)
+────────────────────────────────────────────────────────────────
+  • owner     — Créateur du projet, droits complets
+  • manager   — Gestionnaire du projet (ajouté par le owner)
+  • developer — Développeur, peut gérer ses tâches
+  • designer  — Designer, peut gérer ses tâches
+  • tester    — Testeur, peut gérer ses tâches
+  • viewer    — Observateur du projet, lecture seule
+
+3.3  Rôles contextuels équipe (inchangés, table team_user)
+──────────────────────────────────────────────────────────
+  • lead      — Chef d'équipe
+  • manager   — Gestionnaire d'équipe
+  • developer — Développeur
+  • designer  — Designer
+  • tester    — Testeur
+  • member    — Membre simple
+
+3.4  Relation entre rôles globaux et contextuels
+────────────────────────────────────────────────
+  ┌────────────┬──────────────────────────────────────────────────────────┐
+  │ Rôle global│ Peut avoir ces rôles projet                             │
+  ├────────────┼──────────────────────────────────────────────────────────┤
+  │ admin      │ N'importe lequel (bypass, accède à tout sans membership)│
+  │ manager    │ owner, manager, developer                               │
+  │ member     │ developer, designer, tester, viewer                     │
+  │ viewer     │ viewer uniquement                                       │
+  └────────────┴──────────────────────────────────────────────────────────┘
+
+  Règle : le rôle global définit le PLAFOND de ce que l'utilisateur peut
+  faire. Le rôle contextuel affine au sein d'un projet/équipe.
+
+
+================================================================================
+ 4.  MATRICE DE PERMISSIONS
+================================================================================
+
+4.1  Permissions Spatie (enrichies)
+───────────────────────────────────
+Ajout de 4 nouvelles permissions pour un contrôle plus fin :
+
+  Permissions existantes (10) :
+    manage-users, manage-teams, manage-projects, manage-all-projects,
+    view-projects, manage-tasks, view-tasks, manage-time-entries,
+    view-reports, use-ai-features
+
+  Nouvelles permissions recommandées (+4) :
+    manage-notifications      — Gérer les notifications système (admin)
+    manage-statuses           — Gérer les statuts de tâches d'un projet
+    export-data               — Exporter des données (rapports, CSV)
+    manage-settings           — Accéder aux paramètres système
+
+4.2  Matrice rôle × permission
+──────────────────────────────
+  ┌──────────────────────┬───────┬─────────┬────────┬────────┐
+  │ Permission           │ admin │ manager │ member │ viewer │
+  ├──────────────────────┼───────┼─────────┼────────┼────────┤
+  │ manage-users         │  ✓    │         │        │        │
+  │ manage-teams         │  ✓    │   ✓     │        │        │
+  │ manage-projects      │  ✓    │   ✓     │        │        │
+  │ manage-all-projects  │  ✓    │         │        │        │
+  │ view-projects        │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ manage-tasks         │  ✓    │   ✓     │   ✓    │        │
+  │ view-tasks           │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ manage-time-entries  │  ✓    │   ✓     │   ✓    │        │
+  │ view-reports         │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ use-ai-features      │  ✓    │   ✓     │   ✓    │        │
+  │ manage-notifications │  ✓    │         │        │        │
+  │ manage-statuses      │  ✓    │   ✓     │        │        │
+  │ export-data          │  ✓    │   ✓     │        │        │
+  │ manage-settings      │  ✓    │         │        │        │
+  └──────────────────────┴───────┴─────────┴────────┴────────┘
+
+4.3  Matrice fonctionnelle par espace
+─────────────────────────────────────
+  ┌────────────────────────────┬───────┬─────────┬────────┬────────┐
+  │ Fonctionnalité             │ admin │ manager │ member │ viewer │
+  ├────────────────────────────┼───────┼─────────┼────────┼────────┤
+  │ Dashboard global           │  ✓    │         │        │        │
+  │ Dashboard manager          │       │   ✓     │        │        │
+  │ Dashboard personnel        │       │         │   ✓    │   ✓    │
+  │ CRUD Utilisateurs          │  ✓    │         │        │        │
+  │ Voir tous les utilisateurs │  ✓    │   ✓ *   │        │        │
+  │ CRUD Équipes               │  ✓    │   ✓     │        │        │
+  │ Voir ses équipes           │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ CRUD Projets               │  ✓    │   ✓     │        │        │
+  │ Voir tous les projets      │  ✓    │         │        │        │
+  │ Voir ses projets           │       │   ✓     │   ✓    │   ✓    │
+  │ Gérer membres projet       │  ✓    │   ✓ **  │        │        │
+  │ CRUD Tâches                │  ✓    │   ✓     │   ✓ ***│        │
+  │ Voir tâches                │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ Assigner tâches            │  ✓    │   ✓     │        │        │
+  │ Créer commentaires         │  ✓    │   ✓     │   ✓    │        │
+  │ Time tracking              │  ✓    │   ✓     │   ✓    │        │
+  │ Vue Gantt                  │  ✓    │   ✓     │   ✓    │   ✓    │
+  │ IA — Estimation            │  ✓    │   ✓     │   ✓    │        │
+  │ IA — Risque de retard      │  ✓    │   ✓     │        │        │
+  │ IA — Suggestion affectation│  ✓    │   ✓     │        │        │
+  │ IA — Optimisation globale  │  ✓    │         │        │        │
+  │ Paramètres système         │  ✓    │         │        │        │
+  │ Export données             │  ✓    │   ✓     │        │        │
+  └────────────────────────────┴───────┴─────────┴────────┴────────┘
+
+  *   Manager voit les membres de ses équipes uniquement
+  **  Manager gère les membres de ses propres projets uniquement
+  *** Member peut créer/modifier ses propres tâches dans ses projets
+
+
+================================================================================
+ 5.  RÈGLES MÉTIER D'AUTORISATION
+================================================================================
+
+5.1  Règles par entité
+──────────────────────
+
+  UTILISATEURS :
+    R1 — Seul admin peut créer/modifier/supprimer des comptes utilisateurs
+    R2 — Seul admin peut assigner des rôles globaux Spatie
+    R3 — Chaque utilisateur peut modifier son propre profil (nom, email, mdp)
+    R4 — Un utilisateur ne peut pas changer son propre rôle global
+
+  ÉQUIPES :
+    R5 — Seuls admin et manager peuvent créer des équipes
+    R6 — Admin peut gérer toutes les équipes
+    R7 — Manager ne peut gérer que les équipes qu'il a créées ou dont il
+          est lead/manager dans team_user
+    R8 — Member/Viewer ne peut que visualiser les équipes dont il est membre
+
+  PROJETS :
+    R9  — Seuls admin et manager peuvent créer des projets
+    R10 — Admin voit et gère TOUS les projets (manage-all-projects)
+    R11 — Manager voit et gère uniquement les projets dont il est
+           owner/manager dans project_members
+    R12 — Member voit uniquement les projets dont il est membre
+    R13 — Viewer voit uniquement les projets dont il est membre (lecture seule)
+    R14 — La suppression d'un projet est réservée à admin ou au owner du projet
+
+  TÂCHES :
+    R15 — Admin peut tout faire sur toutes les tâches
+    R16 — Manager peut créer/modifier/supprimer les tâches de ses projets
+    R17 — Member peut créer des tâches dans ses projets, modifier ses propres
+           tâches ou celles qui lui sont assignées
+    R18 — Viewer ne peut que consulter les tâches
+    R19 — L'assignation de tâches est réservée à admin, manager, ou
+           project_role owner/manager
+    R20 — Un member ne peut supprimer que les tâches qu'il a créées
+
+  COMMENTAIRES :
+    R21 — Tout membre d'un projet (sauf viewer) peut ajouter un commentaire
+    R22 — Un commentaire ne peut être supprimé que par son auteur ou un admin
+    R23 — Viewer ne peut pas commenter
+
+  TIME ENTRIES :
+    R24 — Seul l'auteur d'une entrée de temps peut la supprimer (ou admin)
+    R25 — Viewer ne peut pas créer d'entrées de temps
+
+  NOTIFICATIONS :
+    R26 — Chaque utilisateur ne voit que ses propres notifications
+    R27 — Admin peut envoyer des notifications système à tous
+
+  PARAMÈTRES :
+    R28 — Seul admin peut modifier les paramètres système (rôles, permissions)
+    R29 — Chaque utilisateur peut modifier ses paramètres personnels
+
+5.2  Règle du « plafond de rôle »
+──────────────────────────────────
+  Le rôle global Spatie définit le plafond absolu des droits.
+  Le rôle contextuel (project_role, role_in_team) ne peut QUE restreindre,
+  jamais élargir au-delà du plafond global.
+
+  Exemple : Un « member » global qui a le project_role « manager » dans un
+  projet peut gérer les tâches de ce projet, mais ne peut PAS créer de
+  nouveaux projets (car manage-projects n'est pas dans ses permissions globales).
+
+5.3  Règle de l'accès par défaut
+────────────────────────────────
+  Deny by default : tout accès non explicitement autorisé est refusé.
+  Cela s'applique à chaque couche :
+    1. Route middleware → refus si mauvais rôle
+    2. Controller       → refus si mauvaise permission
+    3. Policy           → refus si pas d'accès contextuel
+
+
+================================================================================
+ 6.  SÉPARATION BACKEND (LARAVEL)
+================================================================================
+
+6.1  Enregistrement des middleware
+──────────────────────────────────
+  Fichier : bootstrap/app.php
+
+  Enregistrer les alias middleware de Spatie :
+
+    ->withMiddleware(function (Middleware $middleware) {
+        $middleware->alias([
+            'role'       => \Spatie\Permission\Middleware\RoleMiddleware::class,
+            'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+        ]);
+    })
+
+6.2  Structure des routes API — Trois groupes
+──────────────────────────────────────────────
+  Fichier : routes/api.php
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                         ROUTES PUBLIQUES                              │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │  POST /auth/register                                                  │
+  │  POST /auth/login                                                     │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │              ROUTES COMMUNES (auth:sanctum)                           │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │  POST /auth/logout                                                    │
+  │  GET  /me                                                             │
+  │  GET  /notifications                                                  │
+  │  PATCH /notifications/{id}/read                                       │
+  │  POST /notifications/read-all                                         │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │              ROUTES ADMIN (auth:sanctum + role:admin)                 │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │  GET    /admin/users                   Liste tous les utilisateurs    │
+  │  POST   /admin/users                   Créer un utilisateur          │
+  │  PUT    /admin/users/{user}            Modifier un utilisateur       │
+  │  DELETE /admin/users/{user}            Supprimer un utilisateur      │
+  │  POST   /admin/users/{user}/role       Changer le rôle global       │
+  │  GET    /admin/teams                   Toutes les équipes            │
+  │  GET    /admin/projects                Tous les projets              │
+  │  GET    /admin/stats                   Statistiques globales         │
+  │  GET    /admin/logs                    Logs d'activité               │
+  │  POST   /admin/notifications/broadcast Notification à tous           │
+  │  GET    /admin/ai/optimize/{project}   Optimisation IA globale       │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │        ROUTES MANAGER (auth:sanctum + role:admin,manager)            │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │  --- Équipes ---                                                      │
+  │  GET    /teams                         Ses équipes                    │
+  │  POST   /teams                         Créer une équipe              │
+  │  GET    /teams/{team}                  Détail équipe                  │
+  │  PUT    /teams/{team}                  Modifier équipe               │
+  │  DELETE /teams/{team}                  Supprimer équipe              │
+  │  POST   /teams/{team}/members          Ajouter un membre            │
+  │  DELETE /teams/{team}/members/{user}   Retirer un membre            │
+  │                                                                       │
+  │  --- Projets ---                                                      │
+  │  POST   /projects                      Créer un projet              │
+  │  PUT    /projects/{project}            Modifier projet              │
+  │  DELETE /projects/{project}            Supprimer projet             │
+  │  POST   /projects/{project}/members    Ajouter membre projet        │
+  │  DELETE /projects/{project}/members/{u} Retirer membre projet       │
+  │  POST   /projects/{project}/statuses   Créer un statut             │
+  │  PUT    /statuses/{status}             Modifier un statut           │
+  │  DELETE /statuses/{status}             Supprimer un statut          │
+  │  POST   /projects/{project}/statuses/reorder  Réordonner statuts   │
+  │                                                                       │
+  │  --- Tâches (gestion) ---                                             │
+  │  POST   /tasks/{task}/assign           Assigner tâche               │
+  │  DELETE /tasks/{task}/unassign/{user}   Désassigner tâche           │
+  │  POST   /tasks/{task}/dependencies     Ajouter dépendance          │
+  │  DELETE /tasks/{task}/dependencies/{d}  Retirer dépendance          │
+  │                                                                       │
+  │  --- IA avancée ---                                                   │
+  │  GET    /ai/delay-risk/project/{p}     Risque retard projet         │
+  │  GET    /ai/suggest-assignment/{task}  Suggestion affectation       │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │     ROUTES MEMBRE/VIEWER (auth:sanctum — tous les rôles)             │
+  ├────────────────────────────────────────────────────────────────────────┤
+  │  --- Projets (lecture) ---                                            │
+  │  GET    /projects                      Ses projets (filtré)          │
+  │  GET    /projects/{project}            Détail projet                 │
+  │  GET    /projects/{project}/dashboard  Dashboard projet              │
+  │  GET    /projects/{project}/members    Liste membres                 │
+  │  GET    /projects/{project}/gantt      Données Gantt                 │
+  │                                                                       │
+  │  --- Tâches ---                                                       │
+  │  GET    /projects/{project}/tasks      Tâches du projet             │
+  │  POST   /projects/{project}/tasks      Créer tâche (member+)        │
+  │  GET    /tasks/{task}                  Détail tâche                  │
+  │  PUT    /tasks/{task}                  Modifier tâche (si autorisé)  │
+  │  DELETE /tasks/{task}                  Supprimer tâche (si autorisé) │
+  │  PATCH  /tasks/{task}/move             Déplacer tâche (Kanban)       │
+  │                                                                       │
+  │  --- Sous-ressources tâches ---                                       │
+  │  GET    /tasks/{task}/assignees        Voir les assignés            │
+  │  GET    /tasks/{task}/comments         Voir les commentaires        │
+  │  POST   /tasks/{task}/comments         Ajouter commentaire (member+)│
+  │  DELETE /tasks/{task}/comments/{c}     Supprimer son commentaire    │
+  │  GET    /tasks/{task}/attachments      Voir les pièces jointes      │
+  │  POST   /tasks/{task}/attachments      Ajouter pièce jointe        │
+  │  DELETE /tasks/{task}/attachments/{a}  Supprimer sa pièce jointe   │
+  │  GET    /tasks/{task}/time-entries     Voir entrées de temps        │
+  │  POST   /tasks/{task}/time-entries     Ajouter entrée de temps     │
+  │  DELETE /tasks/{task}/time-entries/{t} Supprimer son entrée         │
+  │                                                                       │
+  │  --- Statuts (lecture) ---                                            │
+  │  GET    /projects/{project}/statuses   Lister statuts               │
+  │                                                                       │
+  │  --- IA basique ---                                                   │
+  │  GET    /ai/estimate/{task}            Estimation durée             │
+  │  GET    /ai/delay-risk/task/{task}     Risque retard tâche          │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  IMPORTANT : Le middleware role:admin,manager signifie « admin OU manager ».
+  L'admin peut toujours accéder aux routes manager. Cela évite de dupliquer
+  les endpoints admin pour les fonctionnalités partagées.
+
+6.3  Création d'une TeamPolicy
+──────────────────────────────
+  Fichier manquant à créer : app/Policies/TeamPolicy.php
+
+  Méthodes :
+    viewAny($user)  → true (filtrage dans le controller)
+    view($user, $team) → admin OU team member
+    create($user)   → permission manage-teams
+    update($user, $team) → admin OU team lead/manager
+    delete($user, $team) → admin OU team lead (si aucun projet actif)
+    addMember($user, $team) → admin OU team lead/manager
+    removeMember($user, $team) → admin OU team lead/manager
+
+6.4  Renforcement des Policies existantes
+─────────────────────────────────────────
+  ProjectPolicy — Modifications :
+    • viewAny : Retourner true, MAIS le controller filtre par rôle
+    • view    : Ajouter vérification viewer voit en lecture seule
+    • create  : INCHANGÉ
+    • update  : Ajouter vérification que le rôle global autorise l'action
+    • delete  : INCHANGÉ
+
+  TaskPolicy — Modifications :
+    • view    : Ajouter condition viewer → lecture seule
+    • create  : Ajouter vérification que l'utilisateur est au moins member
+    • update  : Vérifier que viewer ne peut pas modifier
+    • delete  : Vérifier que viewer ne peut pas supprimer
+
+6.5  Filtrage dans les controllers
+──────────────────────────────────
+  ProjectController@index :
+    (EXISTANT) Si admin → tous les projets. Sinon → projets où user est
+    owner ou member. ✓ Correct, à conserver.
+
+  TeamController@index (À AJOUTER) :
+    Si admin → toutes les équipes
+    Si manager → équipes créées par l'utilisateur + équipes dont il est
+                 lead/manager dans team_user
+    Si member/viewer → équipes dont il est membre dans team_user
+
+  TaskController@index :
+    (À CORRIGER) Actuellement retourne toutes les tâches du projet.
+    Devrait vérifier que l'utilisateur est bien membre du projet avant
+    de retourner les tâches.
+
+
+================================================================================
+ 7.  SÉPARATION FRONTEND (REACT)
+================================================================================
+
+7.1  Nouveau guard : RoleRoute
+──────────────────────────────
+  Fichier : src/routes/guards.jsx — Ajouter :
+
+  function RoleRoute({ roles, children, redirectTo = '/unauthorized' })
+    → Vérifie que user.roles contient au moins un des rôles requis
+    → Redirige vers redirectTo si non autorisé
+
+  function PermissionRoute({ permissions, children })
+    → Vérifie que user.permissions contient la permission requise
+
+7.2  Trois layouts distincts
+────────────────────────────
+  src/components/layout/
+    ├── AdminLayout.jsx         ← Nouveau
+    │   ├── AdminSidebar.jsx    ← Nouveau
+    │   └── AdminTopbar.jsx     ← Existant (Topbar.jsx adapté)
+    ├── ManagerLayout.jsx       ← Nouveau
+    │   ├── ManagerSidebar.jsx  ← Nouveau
+    │   └── ManagerTopbar.jsx   ← Existant (Topbar.jsx adapté)
+    ├── AppLayout.jsx           ← Modifié (espace membre/viewer)
+    │   ├── Sidebar.jsx         ← Modifié (réduit aux items membre)
+    │   └── Topbar.jsx          ← Existant
+    └── SharedLayout.jsx        ← Optionnel (factoriser le shell commun)
+
+7.3  Structure App.jsx mise à jour
+──────────────────────────────────
+  <BrowserRouter>
+    <AuthProvider>
+      <Routes>
+        {/* Public */}
+        <Route element={<GuestRoute><Outlet /></GuestRoute>}>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+        </Route>
+
+        {/* Espace Admin */}
+        <Route element={<ProtectedRoute><RoleRoute roles={['admin']}>
+          <AdminLayout />
+        </RoleRoute></ProtectedRoute>}>
+          <Route path="/admin/dashboard" element={<AdminDashboardPage />} />
+          <Route path="/admin/users" element={<UsersPage />} />
+          <Route path="/admin/users/:id" element={<UserDetailPage />} />
+          <Route path="/admin/teams" element={<AdminTeamsPage />} />
+          <Route path="/admin/projects" element={<AdminProjectsPage />} />
+          <Route path="/admin/ai" element={<AdminAiPage />} />
+          <Route path="/admin/settings" element={<AdminSettingsPage />} />
+          <Route path="/admin/logs" element={<AdminLogsPage />} />
+        </Route>
+
+        {/* Espace Manager */}
+        <Route element={<ProtectedRoute><RoleRoute roles={['admin','manager']}>
+          <ManagerLayout />
+        </RoleRoute></ProtectedRoute>}>
+          <Route path="/manager/dashboard" element={<ManagerDashboardPage />} />
+          <Route path="/manager/teams" element={<TeamsPage />} />
+          <Route path="/manager/teams/:id" element={<TeamDetailPage />} />
+          <Route path="/manager/projects" element={<ProjectsPage />} />
+          <Route path="/manager/projects/:id" element={<ProjectDetailPage />} />
+          <Route path="/manager/gantt" element={<GanttPage />} />
+          <Route path="/manager/ai" element={<AiPage />} />
+          <Route path="/manager/notifications" element={<NotificationsPage />} />
+          <Route path="/manager/settings" element={<SettingsPage />} />
+        </Route>
+
+        {/* Espace Membre/Viewer */}
+        <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
+          <Route path="/app/dashboard" element={<DashboardPage />} />
+          <Route path="/app/projects" element={<ProjectsPage />} />
+          <Route path="/app/projects/:id" element={<ProjectDetailPage />} />
+          <Route path="/app/gantt" element={<GanttPage />} />
+          <Route path="/app/ai" element={<AiPage />} />
+          <Route path="/app/notifications" element={<NotificationsPage />} />
+          <Route path="/app/settings" element={<SettingsPage />} />
+        </Route>
+
+        {/* Redirections */}
+        <Route path="/" element={<RoleRedirect />} />
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Routes>
+    </AuthProvider>
+  </BrowserRouter>
+
+7.4  Sidebars par espace
+────────────────────────
+  AdminSidebar — Items de navigation :
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ LayoutDashboard    Tableau de bord      /admin/dashboard        │
+    │ Users              Utilisateurs         /admin/users            │
+    │ Users              Équipes              /admin/teams            │
+    │ FolderKanban       Projets              /admin/projects         │
+    │ Brain              IA & Analytics        /admin/ai              │
+    │ FileText           Logs                 /admin/logs             │
+    │ Settings           Paramètres           /admin/settings         │
+    └──────────────────────────────────────────────────────────────────┘
+
+  ManagerSidebar — Items de navigation :
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ LayoutDashboard    Tableau de bord      /manager/dashboard      │
+    │ FolderKanban       Projets              /manager/projects       │
+    │ Users              Équipes              /manager/teams          │
+    │ CalendarRange      Gantt                /manager/gantt          │
+    │ Brain              IA & Analytics        /manager/ai            │
+    │ Bell               Notifications        /manager/notifications  │
+    │ Settings           Paramètres           /manager/settings       │
+    └──────────────────────────────────────────────────────────────────┘
+
+  Sidebar (membre) — Items de navigation :
+    ┌──────────────────────────────────────────────────────────────────┐
+    │ LayoutDashboard    Tableau de bord      /app/dashboard          │
+    │ FolderKanban       Mes projets          /app/projects           │
+    │ CalendarRange      Gantt                /app/gantt              │
+    │ Brain              IA                   /app/ai                 │
+    │ Bell               Notifications        /app/notifications      │
+    │ Settings           Mon profil           /app/settings           │
+    └──────────────────────────────────────────────────────────────────┘
+
+7.5  Composant RoleRedirect
+───────────────────────────
+  Après login, redirige vers le bon espace selon le rôle :
+
+    function RoleRedirect() {
+      const { user } = useAuth();
+      if (user.roles.includes('admin'))   → /admin/dashboard
+      if (user.roles.includes('manager')) → /manager/dashboard
+      return → /app/dashboard
+    }
+
+7.6  Hook usePermission
+───────────────────────
+  Nouveau hook utilitaire :
+
+    function usePermission() {
+      const { user } = useAuth();
+      return {
+        hasRole: (role) => user?.roles?.some(r => r.name === role || r === role),
+        hasPermission: (perm) => user?.permissions?.some(
+          p => p.name === perm || p === perm
+        ),
+        isAdmin: user?.roles?.some(r => r.name === 'admin' || r === 'admin'),
+        isManager: user?.roles?.some(r => r.name === 'manager' || r === 'manager'),
+        isViewer: user?.roles?.some(r => r.name === 'viewer' || r === 'viewer'),
+      };
+    }
+
+  Utilisation dans les composants pour masquer/afficher des boutons :
+
+    const { isViewer } = usePermission();
+    {!isViewer && <Button>Ajouter une tâche</Button>}
+
+7.7  Gestion du rôle Viewer dans l'espace membre
+─────────────────────────────────────────────────
+  Le viewer partage les mêmes routes que le member, mais :
+    • Les boutons d'action (Créer, Modifier, Supprimer) sont masqués
+    • Les formulaires ne sont pas accessibles
+    • Les actions POST/PUT/DELETE retournent 403 côté API
+    • Hook usePermission().isViewer contrôle l'affichage
+
+
+================================================================================
+ 8.  VISIBILITÉ DES DONNÉES PAR RÔLE
+================================================================================
+
+8.1  Règles de filtrage par endpoint
+─────────────────────────────────────
+
+  ┌────────────────────────┬─────────────────────────────────────────────┐
+  │ Endpoint               │ Filtrage selon le rôle                      │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /projects          │ admin → tous                               │
+  │                        │ manager → owner OU member (project_members) │
+  │                        │ member/viewer → member uniquement           │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /teams             │ admin → toutes                             │
+  │                        │ manager → créées par lui OU team_user       │
+  │                        │ member/viewer → team_user uniquement        │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /projects/{p}/tasks│ admin → toutes les tâches                  │
+  │                        │ manager → toutes (si accès au projet)      │
+  │                        │ member → toutes (si accès au projet)       │
+  │                        │ viewer → toutes (lecture seule)            │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /notifications     │ Tous → uniquement user_id = Auth::id()     │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /admin/users       │ admin uniquement → tous les utilisateurs   │
+  │                        │ (manager/member/viewer → 403)              │
+  ├────────────────────────┼─────────────────────────────────────────────┤
+  │ GET /admin/stats       │ admin uniquement → statistiques globales   │
+  │                        │ Nb. projets total, nb. users, nb. tâches   │
+  └────────────────────────┴─────────────────────────────────────────────┘
+
+8.2  Dashboard personnalisé par rôle
+────────────────────────────────────
+  Admin Dashboard (/admin/dashboard) :
+    • Nombre total d'utilisateurs, équipes, projets, tâches
+    • Projets par statut (tous projets)
+    • Tâches en retard (toutes)
+    • Activité récente (toute la plateforme)
+    • Graphique d'utilisation IA
+
+  Manager Dashboard (/manager/dashboard) :
+    • Nombre de ses projets, ses équipes
+    • Projets par statut (ses projets)
+    • Charge de travail de ses équipes
+    • Tâches en retard (ses projets)
+    • Prochaines échéances
+    • Alertes IA (risques de retard)
+
+  Member Dashboard (/app/dashboard) :
+    • Tâches assignées à l'utilisateur (par statut)
+    • Projets dont il est membre
+    • Échéances imminentes (ses tâches)
+    • Activité récente (ses projets)
+    • Temps passé cette semaine
+
+  Viewer Dashboard (/app/dashboard — mode viewer) :
+    • Même données que member mais en lecture seule
+    • Pas de boutons d'action
+
+
+================================================================================
+ 9.  SÉCURISATION DES ENDPOINTS IA
+================================================================================
+
+9.1  Analyse du risque actuel
+─────────────────────────────
+  Actuellement, TOUS les endpoints IA sont accessibles à tout utilisateur
+  authentifié ayant la permission use-ai-features (admin, manager, member).
+
+  Problèmes :
+    P1 — Un member peut appeler optimizeProjectAssignments (admin seulement)
+    P2 — Un member peut appeler suggestAssignment (manager+ seulement)
+    P3 — Un member peut appeler delayRiskProject (manager+ seulement)
+    P4 — Aucune vérification que l'utilisateur est membre du projet ciblé
+         (la Policy vérifie update sur la tâche, pas la membership projet)
+
+9.2  Matrice d'accès IA cible
+─────────────────────────────
+  ┌──────────────────────────────┬───────┬─────────┬────────┬────────┐
+  │ Endpoint IA                  │ admin │ manager │ member │ viewer │
+  ├──────────────────────────────┼───────┼─────────┼────────┼────────┤
+  │ GET /ai/estimate/{task}      │  ✓    │   ✓     │   ✓    │        │
+  │ GET /ai/delay-risk/task/{t}  │  ✓    │   ✓     │   ✓    │        │
+  │ GET /ai/delay-risk/project/{p│  ✓    │   ✓     │        │        │
+  │ GET /ai/suggest-assign/{task}│  ✓    │   ✓     │        │        │
+  │ GET /ai/optimize-assign/{p}  │  ✓    │         │        │        │
+  └──────────────────────────────┴───────┴─────────┴────────┴────────┘
+
+9.3  Implémentation recommandée
+───────────────────────────────
+  Séparer les routes IA en trois groupes dans routes/api.php :
+
+  // IA — basique (member+)
+  Route::middleware(['auth:sanctum', 'permission:use-ai-features'])->prefix('ai')
+    ->group(function () {
+        Route::get('estimate/{task}', [AiController::class, 'estimateTask']);
+        Route::get('delay-risk/task/{task}', [AiController::class, 'delayRiskTask']);
+    });
+
+  // IA — avancée (manager+)
+  Route::middleware(['auth:sanctum', 'role:admin,manager'])->prefix('ai')
+    ->group(function () {
+        Route::get('delay-risk/project/{project}', ...);
+        Route::get('suggest-assignment/{task}', ...);
+    });
+
+  // IA — administration (admin uniquement)
+  Route::middleware(['auth:sanctum', 'role:admin'])->prefix('ai')
+    ->group(function () {
+        Route::get('optimize-assignments/{project}', ...);
+    });
+
+9.4  Vérifications supplémentaires dans AiController
+─────────────────────────────────────────────────────
+  En plus du middleware, chaque méthode doit vérifier :
+    1. Que l'utilisateur est membre du projet concerné (sauf admin)
+    2. Que la permission use-ai-features est bien présente
+    3. Rate limiting : limiter les appels IA (ex : 10 requêtes/minute)
+
+  Exemple :
+    public function estimateTask(Task $task) {
+        Gate::authorize('view', $task);
+        $this->authorize('use-ai-features'); // permission check
+        // ... logique IA
+    }
+
+
+================================================================================
+ 10.  ARBORESCENCE FINALE DES ESPACES
+================================================================================
+
+10.1  Pages par espace
+──────────────────────
+
+  ESPACE ADMIN  (/admin/*)
+  ├── /admin/dashboard          AdminDashboardPage — Stats globales, KPIs
+  ├── /admin/users              UsersPage — Liste tous les utilisateurs
+  ├── /admin/users/:id          UserDetailPage — Détail, rôle, projets
+  ├── /admin/teams              AdminTeamsPage — Toutes les équipes
+  ├── /admin/teams/:id          TeamDetailPage — Gestion complète équipe
+  ├── /admin/projects           AdminProjectsPage — Tous les projets
+  ├── /admin/projects/:id       ProjectDetailPage — Vue complète projet
+  ├── /admin/ai                 AdminAiPage — Tous les outils IA
+  ├── /admin/logs               LogsPage — Historique d'activité
+  └── /admin/settings           AdminSettingsPage — Paramètres système
+
+  ESPACE MANAGER  (/manager/*)
+  ├── /manager/dashboard        ManagerDashboardPage — Mes projets, équipes
+  ├── /manager/teams            TeamsPage — Mes équipes
+  ├── /manager/teams/:id        TeamDetailPage — Gestion équipe
+  ├── /manager/projects         ProjectsPage — Mes projets
+  ├── /manager/projects/:id     ProjectDetailPage — Détail projet
+  ├── /manager/gantt            GanttPage — Vue Gantt projets
+  ├── /manager/ai               AiPage — IA avancée (prédiction, suggestion)
+  ├── /manager/notifications    NotificationsPage — Mes notifications
+  └── /manager/settings         SettingsPage — Mon profil
+
+  ESPACE MEMBRE  (/app/*)
+  ├── /app/dashboard            DashboardPage — Mes tâches, mon activité
+  ├── /app/projects             ProjectsPage — Projets dont je suis membre
+  ├── /app/projects/:id         ProjectDetailPage — Détail projet
+  ├── /app/gantt                GanttPage — Vue Gantt mes projets
+  ├── /app/ai                   AiPage — IA basique (estimation)
+  ├── /app/notifications        NotificationsPage — Mes notifications
+  └── /app/settings             SettingsPage — Mon profil
+
+  PAGES COMMUNES (hors layout)
+  ├── /login                    LoginPage
+  ├── /register                 RegisterPage
+  ├── /unauthorized             UnauthorizedPage — 403 personnalisé
+  └── /*                        NotFoundPage — 404
+
+10.2  Arborescence fichiers frontend
+────────────────────────────────────
+  react/src/
+  ├── App.jsx                          ← Refactorisé (3 blocs Route)
+  ├── contexts/
+  │   └── AuthContext.jsx              ← Inchangé
+  ├── hooks/
+  │   ├── usePermission.js             ← NOUVEAU
+  │   ├── useNotifications.js          ← Existant
+  │   └── useTasks.js                  ← Existant
+  ├── routes/
+  │   └── guards.jsx                   ← Ajout RoleRoute, PermissionRoute
+  ├── components/
+  │   └── layout/
+  │       ├── AdminLayout.jsx          ← NOUVEAU
+  │       ├── AdminSidebar.jsx         ← NOUVEAU
+  │       ├── ManagerLayout.jsx        ← NOUVEAU
+  │       ├── ManagerSidebar.jsx       ← NOUVEAU
+  │       ├── AppLayout.jsx            ← Existant (adapté)
+  │       ├── Sidebar.jsx              ← Existant (réduit aux items member)
+  │       └── Topbar.jsx               ← Existant (réutilisé dans tous)
+  ├── pages/
+  │   ├── admin/                       ← NOUVEAU dossier
+  │   │   ├── AdminDashboardPage.jsx
+  │   │   ├── UsersPage.jsx
+  │   │   ├── UserDetailPage.jsx
+  │   │   ├── AdminTeamsPage.jsx
+  │   │   ├── AdminProjectsPage.jsx
+  │   │   ├── AdminAiPage.jsx
+  │   │   ├── AdminSettingsPage.jsx
+  │   │   └── LogsPage.jsx
+  │   ├── manager/                     ← NOUVEAU dossier
+  │   │   └── ManagerDashboardPage.jsx
+  │   ├── dashboard/
+  │   │   └── DashboardPage.jsx        ← Modifié (filtré par user)
+  │   ├── projects/
+  │   │   ├── ProjectsPage.jsx         ← Réutilisé (scope filtré par API)
+  │   │   └── ProjectDetailPage.jsx    ← Réutilisé
+  │   ├── teams/
+  │   │   ├── TeamsPage.jsx            ← Réutilisé (scope filtré par API)
+  │   │   └── TeamDetailPage.jsx       ← Réutilisé
+  │   ├── gantt/
+  │   │   └── GanttPage.jsx            ← Réutilisé
+  │   ├── ai/
+  │   │   └── AiPage.jsx               ← Modifié (masquer outils par rôle)
+  │   ├── notifications/
+  │   │   └── NotificationsPage.jsx    ← Réutilisé
+  │   ├── settings/
+  │   │   └── SettingsPage.jsx         ← Réutilisé
+  │   ├── auth/
+  │   │   ├── LoginPage.jsx            ← Existant
+  │   │   └── RegisterPage.jsx         ← Existant
+  │   └── errors/
+  │       ├── NotFoundPage.jsx         ← Existant
+  │       └── UnauthorizedPage.jsx     ← NOUVEAU
+
+10.3  Arborescence fichiers backend
+───────────────────────────────────
+  laravel/app/
+  ├── Http/
+  │   ├── Controllers/
+  │   │   └── Api/
+  │   │       ├── AuthController.php       ← Modifié (redirect path par rôle)
+  │   │       ├── ProjectController.php    ← Modifié (filtrage renforcé)
+  │   │       ├── TaskController.php       ← Modifié (vérifs viewer)
+  │   │       ├── TeamController.php       ← Modifié (filtrage + Policy)
+  │   │       ├── AiController.php         ← Modifié (vérifs de rôle)
+  │   │       ├── NotificationController.php ← Inchangé
+  │   │       ├── GanttController.php      ← Inchangé
+  │   │       ├── TaskStatusController.php ← Ajout vérifs permission
+  │   │       └── Admin/                   ← NOUVEAU dossier
+  │   │           ├── UserController.php   ← NOUVEAU (CRUD users)
+  │   │           └── StatsController.php  ← NOUVEAU (stats globales)
+  │   └── Requests/                        ← Existant
+  ├── Models/                              ← Inchangés
+  ├── Policies/
+  │   ├── ProjectPolicy.php               ← Renforcé
+  │   ├── TaskPolicy.php                  ← Renforcé
+  │   └── TeamPolicy.php                  ← NOUVEAU
+  ├── Services/
+  │   └── AI/                             ← Inchangé
+  └── Providers/
+      └── AppServiceProvider.php          ← Ajout TeamPolicy
+
+
+================================================================================
+ 11.  PLAN DE REFACTORISATION
+================================================================================
+
+Le plan est découpé en 8 étapes ordonnées par priorité et dépendances.
+Chaque étape est indépendamment déployable.
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 1 — Middleware Spatie (Backend)                                  │
+  │ Priorité : CRITIQUE                                                    │
+  │ Fichiers : bootstrap/app.php                                          │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Enregistrer les alias middleware role, permission,                │
+  │      role_or_permission dans bootstrap/app.php                        │
+  │   2. Tester que les middleware fonctionnent avec un test PHPUnit       │
+  │                                                                        │
+  │ Estimation effort : Faible                                             │
+  │ Risque : Aucun — ajout non-breaking                                   │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 2 — Restructuration des routes API (Backend)                    │
+  │ Priorité : CRITIQUE                                                    │
+  │ Fichiers : routes/api.php                                             │
+  │ Dépend de : Étape 1                                                   │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Séparer les routes en 4 groupes middleware :                     │
+  │      - Publiques (auth/login, auth/register)                          │
+  │      - Communes (auth:sanctum) — logout, me, notifications            │
+  │      - Admin (auth:sanctum + role:admin) — users, stats, logs         │
+  │      - Manager+ (auth:sanctum + role:admin,manager) — teams CRUD,     │
+  │        projects CRUD, task assign, IA avancée                         │
+  │      - Tous auth (auth:sanctum) — lecture projets/tâches, IA basique  │
+  │   2. Appliquer middleware permission:use-ai-features sur routes IA    │
+  │   3. Tester chaque groupe avec des requêtes par rôle                  │
+  │                                                                        │
+  │ Estimation effort : Moyen                                              │
+  │ Risque : IMPORTANT — peut casser le frontend si les URLs changent.    │
+  │          Tester avec les 4 rôles séparément.                          │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 3 — TeamPolicy + renforcement Policies (Backend)                │
+  │ Priorité : HAUTE                                                       │
+  │ Fichiers : app/Policies/TeamPolicy.php (nouveau),                     │
+  │            app/Policies/ProjectPolicy.php,                            │
+  │            app/Policies/TaskPolicy.php,                               │
+  │            app/Providers/AppServiceProvider.php                        │
+  │ Dépend de : Aucune (indépendant des étapes 1-2)                      │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Créer TeamPolicy avec toutes les méthodes                        │
+  │   2. Enregistrer Team → TeamPolicy dans AppServiceProvider            │
+  │   3. Ajouter Gate::authorize dans TeamController                      │
+  │   4. Renforcer ProjectPolicy (vérif viewer lecture seule)             │
+  │   5. Renforcer TaskPolicy (bloquer viewer sur create/update/delete)   │
+  │   6. Tests PHPUnit pour chaque Policy                                 │
+  │                                                                        │
+  │ Estimation effort : Moyen                                              │
+  │ Risque : Faible — ajout/renforcement, pas de suppression              │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 4 — Nouvelles permissions + mise à jour Seeder (Backend)        │
+  │ Priorité : MOYENNE                                                     │
+  │ Fichiers : database/seeders/RoleAndPermissionSeeder.php,              │
+  │            nouvelle migration pour ajouter les permissions             │
+  │ Dépend de : Aucune                                                    │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Ajouter les 4 nouvelles permissions au seeder                    │
+  │   2. Mettre à jour la matrice d'assignation par rôle                  │
+  │   3. Créer une migration pour ajouter les permissions en production   │
+  │   4. Re-seeder et vérifier                                            │
+  │                                                                        │
+  │ Estimation effort : Faible                                             │
+  │ Risque : Aucun — ajout de données uniquement                          │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 5 — Admin Controllers (Backend)                                  │
+  │ Priorité : MOYENNE                                                     │
+  │ Fichiers : app/Http/Controllers/Api/Admin/UserController.php          │
+  │            app/Http/Controllers/Api/Admin/StatsController.php         │
+  │ Dépend de : Étapes 1, 2                                               │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Créer UserController (CRUD complet + assignation de rôle)        │
+  │   2. Créer StatsController (statistiques globales)                    │
+  │   3. Créer les FormRequests associés                                  │
+  │   4. Enregistrer les routes dans le groupe admin                      │
+  │   5. Tests d'intégration                                              │
+  │                                                                        │
+  │ Estimation effort : Moyen-élevé                                        │
+  │ Risque : Faible — nouveaux fichiers, pas de modification d'existants  │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 6 — Guards et layouts frontend (React)                           │
+  │ Priorité : HAUTE                                                       │
+  │ Fichiers : src/routes/guards.jsx, src/hooks/usePermission.js,         │
+  │            src/components/layout/AdminLayout.jsx,                     │
+  │            src/components/layout/AdminSidebar.jsx,                    │
+  │            src/components/layout/ManagerLayout.jsx,                   │
+  │            src/components/layout/ManagerSidebar.jsx,                  │
+  │            src/components/layout/Sidebar.jsx (modifié),               │
+  │            src/App.jsx (refactorisé)                                  │
+  │ Dépend de : Étapes 2, 5 (les routes API doivent être en place)       │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Créer RoleRoute et PermissionRoute dans guards.jsx               │
+  │   2. Créer le hook usePermission                                      │
+  │   3. Créer AdminLayout + AdminSidebar                                 │
+  │   4. Créer ManagerLayout + ManagerSidebar                             │
+  │   5. Modifier Sidebar.jsx (réduire aux items member)                  │
+  │   6. Refactoriser App.jsx avec les 3 blocs de routes                 │
+  │   7. Créer le composant RoleRedirect                                  │
+  │   8. Mettre à jour AuthContext si nécessaire                          │
+  │                                                                        │
+  │ Estimation effort : Élevé                                              │
+  │ Risque : IMPORTANT — changement de toutes les URLs frontend.          │
+  │          Bien tester la navigation et les redirections.               │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 7 — Pages admin et dashboards différenciés (React)              │
+  │ Priorité : MOYENNE                                                     │
+  │ Fichiers : src/pages/admin/* (nouveaux),                              │
+  │            src/pages/manager/ManagerDashboardPage.jsx (nouveau),       │
+  │            src/pages/dashboard/DashboardPage.jsx (modifié)            │
+  │ Dépend de : Étapes 5, 6                                               │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Créer AdminDashboardPage (stats globales)                        │
+  │   2. Créer UsersPage + UserDetailPage (gestion utilisateurs)          │
+  │   3. Créer AdminTeamsPage et AdminProjectsPage                        │
+  │   4. Créer AdminAiPage (tous les outils IA)                           │
+  │   5. Créer ManagerDashboardPage                                       │
+  │   6. Créer UnauthorizedPage (403)                                     │
+  │   7. Modifier DashboardPage pour afficher les données membre          │
+  │   8. Modifier AiPage pour masquer les outils selon le rôle            │
+  │                                                                        │
+  │ Estimation effort : Élevé                                              │
+  │ Risque : Moyen — beaucoup de nouveaux fichiers mais logique simple    │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │ ÉTAPE 8 — Tests, masquage viewer, polissage (Transversal)             │
+  │ Priorité : MOYENNE                                                     │
+  │ Dépend de : Toutes les étapes précédentes                             │
+  │                                                                        │
+  │ Actions :                                                              │
+  │   1. Ajouter les conditions isViewer dans les composants partagés     │
+  │   2. Tests E2E : login admin → accès admin, login member → accès app  │
+  │   3. Tests : accès interdit (member vers /admin → 403 ou redirect)    │
+  │   4. Vérifier les data seeds pour les 4 rôles                         │
+  │   5. Rate limiting sur les endpoints IA                               │
+  │   6. Documentation API (optionnel)                                    │
+  │                                                                        │
+  │ Estimation effort : Moyen                                              │
+  │ Risque : Faible — finalisation et tests                               │
+  └────────────────────────────────────────────────────────────────────────┘
+
+  RÉSUMÉ DU PLAN :
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  Étape 1    Étape 2    Étape 3    Étape 4                          │
+  │  Middleware → Routes  │ Policies │ Permissions                     │
+  │     │          │      │     │    │     │                           │
+  │     │          └──────┼─────┼────┘     │                           │
+  │     │                 │     │          │                           │
+  │     └─────────────────┤     │          │                           │
+  │                       ▼     ▼          ▼                           │
+  │                    Étape 5  Étape 6  (indépendant)                 │
+  │                    Admin    Guards                                  │
+  │                    Ctrl     Layouts                                 │
+  │                       │     │                                      │
+  │                       └──┬──┘                                      │
+  │                          ▼                                         │
+  │                       Étape 7                                      │
+  │                       Pages admin                                   │
+  │                          │                                         │
+  │                          ▼                                         │
+  │                       Étape 8                                      │
+  │                       Tests & polish                                │
+  └─────────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+ 12.  BONNES PRATIQUES ET PIÈGES À ÉVITER
+================================================================================
+
+12.1  Bonnes pratiques
+──────────────────────
+
+  BP1 — Défense en profondeur
+  ────────────────────────────
+  Ne jamais se fier à une seule couche de sécurité. Chaque requête doit
+  traverser 3 niveaux : middleware → controller → policy.
+  Même si le middleware bloque, la Policy doit aussi vérifier indépendamment.
+
+  BP2 — Deny by default
+  ──────────────────────
+  Toute Policy doit retourner false par défaut. Les conditions sont des
+  « ouvertures » explicites, pas des « fermetures ».
+    ✗ return !$user->hasRole('viewer');  // Fragile
+    ✓ return $user->hasRole('admin')     // Explicite
+        || $user->hasRole('manager');
+
+  BP3 — Toujours passer par Gate::authorize()
+  ────────────────────────────────────────────
+  Ne jamais vérifier manuellement les permissions dans un controller avec
+  des if/else ad hoc. Utiliser systématiquement :
+    $this->authorize('action', $model);
+  ou
+    Gate::authorize('action', $model);
+  Cela centralise la logique et facilite les tests.
+
+  BP4 — Filtrage côté serveur obligatoire
+  ────────────────────────────────────────
+  Le frontend masque les éléments pour l'UX, mais le backend DOIT filtrer
+  les données indépendamment. Un utilisateur malveillant peut appeler
+  directement l'API.
+    ✗ Masquer un bouton suffit
+    ✓ L'API retourne 403 + le bouton est masqué
+
+  BP5 — Utiliser les scopes Eloquent
+  ───────────────────────────────────
+  Créer un scope réutilisable pour le filtrage par utilisateur :
+    scopeAccessibleBy($query, User $user)
+  Cela évite de dupliquer la logique de filtrage dans chaque controller.
+
+  BP6 — Token Sanctum avec abilities
+  ───────────────────────────────────
+  Possibilité future : lors de la création du token Sanctum, restreindre
+  les abilities pour un contrôle encore plus fin :
+    $user->createToken('app', ['view-projects', 'manage-tasks']);
+
+  BP7 — Tester chaque rôle indépendamment
+  ────────────────────────────────────────
+  Créer une suite de tests avec 4 utilisateurs (un par rôle) et vérifier
+  que chaque endpoint retourne le bon code HTTP (200, 403, 404).
+  Utiliser PHPUnit avec des data providers :
+    @dataProvider roleProvider
+    public function test_endpoint_access($role, $expectedStatus)
+
+  BP8 — Journaliser les accès refusés
+  ────────────────────────────────────
+  Logger les tentatives d'accès non autorisé (403) pour détecter les
+  tentatives d'escalade de privilèges. Utiliser un middleware global
+  ou les exceptions Laravel (Handler).
+
+  BP9 — Séparer les Resources API par espace
+  ───────────────────────────────────────────
+  Les admin endpoints peuvent retourner plus de données qu'un endpoint
+  membre. Utiliser des Resources conditionnelles :
+    AdminProjectResource  → inclut owner, membres, stats
+    ProjectResource       → données de base uniquement
+
+  BP10 — Invalidation du cache Spatie
+  ────────────────────────────────────
+  Après tout changement de rôle ou permission, appeler :
+    app()[PermissionRegistrar::class]->forgetCachedPermissions();
+  Sinon les anciennes permissions restent en cache.
+
+12.2  Pièges à éviter
+─────────────────────
+
+  PIÈGE 1 — Confusion rôle global / rôle contextuel
+  ──────────────────────────────────────────────────
+  Ne pas confondre le rôle Spatie (admin, manager, member, viewer) avec
+  le project_role (owner, manager, developer...) ou le role_in_team.
+  Nommer clairement les variables :
+    ✗ $role = ...; // Ambigu
+    ✓ $globalRole = $user->getRoleNames()->first();
+    ✓ $projectRole = $project->members()->find($user->id)?->pivot->project_role;
+
+  PIÈGE 2 — hasRole('admin') en dur partout
+  ──────────────────────────────────────────
+  Centraliser le bypass admin dans les Policies, pas dans les controllers.
+  Si demain on ajoute un rôle « super-admin », il faudrait modifier chaque
+  controller. Avec les Policies, un seul endroit à modifier.
+
+  PIÈGE 3 — Oublier de vérifier la membership projet
+  ──────────────────────────────────────────────────
+  Un utilisateur authentifié avec le bon rôle global peut ne pas être
+  membre du projet ciblé. Toujours vérifier la membership dans la Policy.
+
+  PIÈGE 4 — Frontend comme seule barrière
+  ────────────────────────────────────────
+  Si on masque un bouton « Supprimer » pour les viewers côté React mais
+  qu'on oublie de bloquer le DELETE côté API, un viewer peut supprimer
+  via un appel direct (curl, Postman).
+
+  PIÈGE 5 — Casser les URLs existantes
+  ─────────────────────────────────────
+  Le passage de /projects à /admin/projects, /manager/projects, /app/projects
+  va casser tous les liens existants. Prévoir des redirections temporaires
+  ou appliquer le changement en une fois (frontend + backend ensemble).
+
+  PIÈGE 6 — Ne pas tester le rôle « viewer »
+  ───────────────────────────────────────────
+  Le viewer est le rôle le plus restrictif et le plus facile à oublier.
+  Tester systématiquement que chaque action d'écriture est bloquée pour
+  le viewer, autant en API qu'en frontend.
+
+  PIÈGE 7 — Multiples rôles par utilisateur
+  ──────────────────────────────────────────
+  Spatie permet plusieurs rôles par user. Pour l'instant, l'architecture
+  suppose un seul rôle global par utilisateur. Si des multi-rôles sont
+  nécessaires (ex : admin ET manager), il faudra adapter la logique de
+  redirection et le RoleRoute pour prendre le rôle le plus élevé.
+  Recommandation : restreindre à UN seul rôle global par utilisateur.
+
+  PIÈGE 8 — Migration en production
+  ──────────────────────────────────
+  Ajouter des permissions via un seeder ne suffit pas en production.
+  Créer une migration dédiée qui insère les nouvelles permissions :
+    Permission::firstOrCreate(['name' => 'manage-notifications']);
+  Cela garantit l'exécution lors du déploiement.
+
+  PIÈGE 9 — Le cache navigateur
+  ─────────────────────────────
+  Après un changement de rôle, l'objet user en localStorage contient
+  encore les anciennes permissions. Forcer un appel GET /me après
+  chaque action admin qui modifie les rôles d'un utilisateur, ou
+  implémenter un mécanisme de refresh automatique.
+
+  PIÈGE 10 — Rate limiting oublié sur l'IA
+  ─────────────────────────────────────────
+  Sans rate limiting, un utilisateur pourrait surcharger les services IA.
+  Appliquer un throttle par rôle :
+    admin   → 60 req/min
+    manager → 30 req/min
+    member  → 10 req/min
+
+
+================================================================================
+ ANNEXE A — RÉSUMÉ DES FICHIERS À CRÉER/MODIFIER
+================================================================================
+
+  FICHIERS BACKEND À MODIFIER :
+    [M] bootstrap/app.php               — Enregistrement middleware Spatie
+    [M] routes/api.php                  — Restructuration en groupes
+    [M] app/Policies/ProjectPolicy.php  — Renforcement vérifications
+    [M] app/Policies/TaskPolicy.php     — Renforcement vérifications
+    [M] app/Providers/AppServiceProvider.php — Ajout TeamPolicy
+    [M] app/Http/Controllers/Api/TeamController.php — Ajout Policy + filtrage
+    [M] app/Http/Controllers/Api/AiController.php   — Vérifs de rôle
+    [M] app/Http/Controllers/Api/TaskController.php  — Vérifs viewer
+    [M] database/seeders/RoleAndPermissionSeeder.php — +4 permissions
+
+  FICHIERS BACKEND À CRÉER :
+    [+] app/Policies/TeamPolicy.php
+    [+] app/Http/Controllers/Api/Admin/UserController.php
+    [+] app/Http/Controllers/Api/Admin/StatsController.php
+    [+] app/Http/Requests/Admin/StoreUserRequest.php
+    [+] app/Http/Requests/Admin/UpdateUserRequest.php
+
+  FICHIERS FRONTEND À MODIFIER :
+    [M] src/App.jsx                     — 3 blocs de routes
+    [M] src/routes/guards.jsx           — Ajout RoleRoute, PermissionRoute
+    [M] src/components/layout/Sidebar.jsx — Réduit aux items member
+    [M] src/pages/ai/AiPage.jsx         — Masquage outils par rôle
+    [M] src/pages/dashboard/DashboardPage.jsx — Dashboard membre
+
+  FICHIERS FRONTEND À CRÉER :
+    [+] src/hooks/usePermission.js
+    [+] src/components/layout/AdminLayout.jsx
+    [+] src/components/layout/AdminSidebar.jsx
+    [+] src/components/layout/ManagerLayout.jsx
+    [+] src/components/layout/ManagerSidebar.jsx
+    [+] src/pages/admin/AdminDashboardPage.jsx
+    [+] src/pages/admin/UsersPage.jsx
+    [+] src/pages/admin/UserDetailPage.jsx
+    [+] src/pages/admin/AdminTeamsPage.jsx
+    [+] src/pages/admin/AdminProjectsPage.jsx
+    [+] src/pages/admin/AdminAiPage.jsx
+    [+] src/pages/admin/AdminSettingsPage.jsx
+    [+] src/pages/admin/LogsPage.jsx
+    [+] src/pages/manager/ManagerDashboardPage.jsx
+    [+] src/pages/errors/UnauthorizedPage.jsx
+
+  TOTAL : 9 fichiers backend modifiés + 5 créés
+          5 fichiers frontend modifiés + 15 créés
+
+
+================================================================================
+ ANNEXE B — CHECKLIST DE VALIDATION
+================================================================================
+
+  □  Middleware Spatie enregistré dans bootstrap/app.php
+  □  Routes API séparées en groupes avec middleware de rôle
+  □  TeamPolicy créée et enregistrée
+  □  ProjectPolicy renforcée (viewer = lecture seule)
+  □  TaskPolicy renforcée (viewer bloqué sur écriture)
+  □  4 nouvelles permissions ajoutées au seeder
+  □  Admin UserController fonctionnel avec CRUD users
+  □  Admin StatsController fonctionnel
+  □  RoleRoute et PermissionRoute dans guards.jsx
+  □  Hook usePermission créé et utilisé
+  □  AdminLayout + AdminSidebar créés
+  □  ManagerLayout + ManagerSidebar créés
+  □  App.jsx avec 3 blocs de routes
+  □  RoleRedirect redirige correctement après login
+  □  AdminDashboardPage affiche les stats globales
+  □  ManagerDashboardPage affiche les projets/équipes manager
+  □  DashboardPage filtre par utilisateur membre
+  □  AiPage masque les outils selon le rôle
+  □  Viewer ne peut effectuer aucune action d'écriture (API + UI)
+  □  Tests PHPUnit : accès par rôle (200/403) pour chaque endpoint
+  □  Test : admin accède à /admin/*, manager redirigé vers 403
+  □  Test : member accède à /app/*, admin fonctionne aussi sur /manager/*
+  □  Login redirige vers le bon espace selon le rôle
+  □  Accès direct à une URL d'un autre espace → redirect/403
+  □  Cache Spatie invalidé après changement de rôle
+  □  Rate limiting IA configuré par rôle
+
+
+================================================================================
+              FIN DU DOCUMENT — ARCHITECTURE RBAC
+================================================================================

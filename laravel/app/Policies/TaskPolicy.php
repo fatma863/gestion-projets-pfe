@@ -23,11 +23,19 @@ class TaskPolicy
 
     public function create(User $user): bool
     {
+        if ($user->hasRole('viewer')) {
+            return false;
+        }
+
         return $user->hasPermissionTo('manage-tasks');
     }
 
     public function update(User $user, Task $task): bool
     {
+        if ($user->hasRole('viewer')) {
+            return false;
+        }
+
         if ($user->hasRole('admin')) {
             return true;
         }
@@ -46,6 +54,10 @@ class TaskPolicy
 
     public function delete(User $user, Task $task): bool
     {
+        if ($user->hasRole('viewer')) {
+            return false;
+        }
+
         if ($user->hasRole('admin')) {
             return true;
         }

@@ -8,21 +8,31 @@ use App\Http\Resources\TeamMemberResource;
 use App\Models\Team;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class TeamController extends Controller
 {
     public function index(Request $request): JsonResponse
     {
-        $teams = Team::withCount('members', 'projects')
+        $user = $request->user();
+
+        $query = Team::withCount('members', 'projects')
             ->when($request->search, fn ($q, $s) => $q->where('name', 'like', "%{$s}%"))
-            ->orderBy('name')
-            ->paginate($request->per_page ?? 15);
+            ->orderBy('name');
+
+        // Filtrage par rôle
+        if (!$user->hasAnyRole(['admin', 'manager'])) {
+            $query->whereHas('members', fn ($q) => $q->where('user_id', $user->id));
+        }
+
+        $teams = $query->paginate($request->per_page ?? 15);
 
         return response()->json(TeamResource::collection($teams)->response()->getData(true));
     }
 
     public function store(Request $request): JsonResponse
     {
+        Gate::authorize('create', Team::class);
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
@@ -42,6 +52,8 @@ class TeamController extends Controller
 
     public function show(Team $team): JsonResponse
     {
+        Gate::authorize('view', $team);
+
         $team->loadCount('members', 'projects');
         $team->load('members');
 
@@ -50,6 +62,8 @@ class TeamController extends Controller
 
     public function update(Request $request, Team $team): JsonResponse
     {
+        Gate::authorize('update', $team);
+
         $data = $request->validate([
             'name' => 'sometimes|required|string|max:255',
             'description' => 'nullable|string',
@@ -65,6 +79,8 @@ class TeamController extends Controller
 
     public function destroy(Team $team): JsonResponse
     {
+        Gate::authorize('delete', $team);
+
         $team->delete();
 
         return response()->json(['message' => 'Équipe supprimée.']);
@@ -72,6 +88,8 @@ class TeamController extends Controller
 
     public function addMember(Request $request, Team $team): JsonResponse
     {
+        Gate::authorize('manageMember', $team);
+
         $data = $request->validate([
             'user_id' => 'required|exists:users,id',
             'role_in_team' => 'sometimes|string|in:lead,manager,developer,designer,tester,member',
@@ -96,6 +114,8 @@ class TeamController extends Controller
 
     public function removeMember(Team $team, int $userId): JsonResponse
     {
+        Gate::authorize('manageMember', $team);
+
         $team->members()->detach($userId);
 
         return response()->json(['message' => 'Membre retiré de l\'équipe.']);

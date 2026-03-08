@@ -69,11 +69,12 @@ class DelayRiskService
         }
 
         // Factor 3: High complexity with no estimated hours
-        if ($task->complexity >= 7 && !$task->estimated_hours) {
+        $complexity = $task->complexity ?? 5;
+        if ($complexity >= 7 && !$task->estimated_hours) {
             $riskScore += 10;
             $riskFactors[] = [
                 'factor' => 'high_complexity_no_estimate',
-                'detail' => "Complexité élevée ({$task->complexity}/10) sans estimation d'heures",
+                'detail' => "Complexité élevée ({$complexity}/10) sans estimation d'heures",
                 'impact' => 'medium',
             ];
         }

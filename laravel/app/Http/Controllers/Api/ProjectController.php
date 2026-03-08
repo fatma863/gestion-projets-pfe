@@ -10,14 +10,48 @@ use App\Models\TaskStatus;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use App\Services\NotificationService;
+use App\Services\ActivityLogService;
 
 class ProjectController extends Controller
 {
+    /**
+     * List users with manager role — for admin project form dropdown.
+     */
+    public function managers(Request $request): JsonResponse
+    {
+        $managers = \App\Models\User::role('manager')
+            ->select('id', 'name', 'email')
+            ->orderBy('name')
+            ->get();
+
+        return response()->json(['managers' => $managers]);
+    }
+
+    /**
+     * Search users — for member addition dropdown.
+     */
+    public function searchUsers(Request $request): JsonResponse
+    {
+        $query = \App\Models\User::select('id', 'name', 'email')
+            ->orderBy('name');
+
+        if ($request->search) {
+            $search = $request->search;
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
+        }
+
+        return response()->json(['users' => $query->limit(50)->get()]);
+    }
+
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        $query = Project::with('owner')
+        $query = Project::with('owner', 'manager')
             ->withCount('members', 'tasks')
             ->when($request->status, fn ($q, $s) => $q->where('status', $s))
             ->when($request->team_id, fn ($q, $t) => $q->where('team_id', $t))
@@ -27,7 +61,17 @@ class ProjectController extends Controller
             }))
             ->orderByDesc('updated_at');
 
-        if (!$user->hasRole('admin')) {
+        if ($user->hasRole('admin')) {
+            // Admin sees all projects
+        } elseif ($user->hasRole('manager')) {
+            // Manager sees projects they manage or are a member of
+            $query->where(function ($q) use ($user) {
+                $q->where('manager_id', $user->id)
+                  ->orWhere('owner_id', $user->id)
+                  ->orWhereHas('members', fn ($q2) => $q2->where('user_id', $user->id));
+            });
+        } else {
+            // Member / viewer sees only projects they belong to
             $query->where(function ($q) use ($user) {
                 $q->where('owner_id', $user->id)
                   ->orWhereHas('members', fn ($q2) => $q2->where('user_id', $user->id));
@@ -43,7 +87,10 @@ class ProjectController extends Controller
     {
         Gate::authorize('create', Project::class);
 
-        $data = $request->validate([
+        $user = $request->user();
+        $isAdmin = $user->hasRole('admin');
+
+        $rules = [
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:10|unique:projects,code',
             'description' => 'nullable|string',
@@ -51,15 +98,69 @@ class ProjectController extends Controller
             'status' => 'sometimes|in:planning,active,on_hold,completed,cancelled',
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
-        ]);
+            'member_ids' => 'nullable|array',
+            'member_ids.*' => 'exists:users,id',
+        ];
 
-        $data['owner_id'] = $request->user()->id;
-        $data['created_by'] = $request->user()->id;
+        // Admin must choose a manager; manager auto-assigns
+        if ($isAdmin) {
+            $rules['manager_id'] = 'required|exists:users,id';
+        } else {
+            $rules['manager_id'] = 'nullable';
+        }
+
+        $data = $request->validate($rules);
+
+        // Validate that manager_id actually references a user with manager role
+        if ($isAdmin && !empty($data['manager_id'])) {
+            $managerUser = \App\Models\User::find($data['manager_id']);
+            if (!$managerUser || !$managerUser->hasRole('manager')) {
+                return response()->json([
+                    'message' => 'Le manager sélectionné n\'est pas valide.',
+                    'errors' => ['manager_id' => ['L\'utilisateur sélectionné n\'a pas le rôle manager.']],
+                ], 422);
+            }
+        }
+
+        // For non-admin (manager), auto-assign themselves
+        if (!$isAdmin) {
+            $data['manager_id'] = $user->id;
+        }
+
+        $memberIds = $data['member_ids'] ?? [];
+        unset($data['member_ids']);
+
+        if (!empty($data['team_id'])) {
+            $isMember = $user->hasRole('admin')
+                || $user->teams()->where('teams.id', $data['team_id'])->exists();
+            if (!$isMember) {
+                abort(403, 'Vous n\'êtes pas membre de cette équipe.');
+            }
+        }
+
+        $data['owner_id'] = $user->id;
+        $data['created_by'] = $user->id;
 
         $project = Project::create($data);
 
         // Add creator as project owner member
-        $project->members()->attach($request->user()->id, ['project_role' => 'owner']);
+        $project->members()->attach($user->id, ['project_role' => 'owner']);
+
+        // If admin created for a different manager, add that manager as member too
+        if ($isAdmin && $data['manager_id'] && (int) $data['manager_id'] !== $user->id) {
+            $project->members()->syncWithoutDetaching([
+                $data['manager_id'] => ['project_role' => 'manager'],
+            ]);
+        }
+
+        // Add selected members
+        foreach ($memberIds as $memberId) {
+            if ((int) $memberId !== $user->id && (int) $memberId !== (int) ($data['manager_id'] ?? 0)) {
+                $project->members()->syncWithoutDetaching([
+                    $memberId => ['project_role' => 'developer'],
+                ]);
+            }
+        }
 
         // Create default Kanban statuses
         $defaultStatuses = [
@@ -72,7 +173,10 @@ class ProjectController extends Controller
             $project->statuses()->create($status);
         }
 
-        $project->load('owner', 'members', 'statuses');
+        $project->load('owner', 'manager', 'members', 'statuses');
+
+        NotificationService::projectCreated($project);
+        ActivityLogService::projectCreated($project);
 
         return response()->json([
             'message' => 'Projet créé avec succès.',
@@ -84,7 +188,7 @@ class ProjectController extends Controller
     {
         Gate::authorize('view', $project);
 
-        $project->load('owner', 'team', 'members', 'statuses')
+        $project->load('owner', 'manager', 'team', 'members', 'statuses')
                 ->loadCount('members', 'tasks');
 
         return response()->json(['project' => new ProjectResource($project)]);
@@ -94,7 +198,10 @@ class ProjectController extends Controller
     {
         Gate::authorize('update', $project);
 
-        $data = $request->validate([
+        $user = $request->user();
+        $isAdmin = $user->hasRole('admin');
+
+        $rules = [
             'name' => 'sometimes|required|string|max:255',
             'code' => 'sometimes|required|string|max:10|unique:projects,code,' . $project->id,
             'description' => 'nullable|string',
@@ -103,10 +210,35 @@ class ProjectController extends Controller
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
             'owner_id' => 'sometimes|exists:users,id',
-        ]);
+        ];
+
+        // Only admin can change the manager
+        if ($isAdmin) {
+            $rules['manager_id'] = 'sometimes|exists:users,id';
+        }
+
+        $data = $request->validate($rules);
+
+        // Validate manager role if changing manager_id
+        if ($isAdmin && !empty($data['manager_id'])) {
+            $managerUser = \App\Models\User::find($data['manager_id']);
+            if (!$managerUser || !$managerUser->hasRole('manager')) {
+                return response()->json([
+                    'message' => 'Le manager sélectionné n\'est pas valide.',
+                    'errors' => ['manager_id' => ['L\'utilisateur sélectionné n\'a pas le rôle manager.']],
+                ], 422);
+            }
+        }
+
+        // Non-admin cannot change manager_id
+        if (!$isAdmin) {
+            unset($data['manager_id']);
+        }
 
         $project->update($data);
-        $project->load('owner', 'team', 'members', 'statuses');
+        $project->load('owner', 'manager', 'team', 'members', 'statuses');
+
+        NotificationService::projectUpdated($project);
 
         return response()->json([
             'message' => 'Projet mis à jour.',
@@ -182,6 +314,8 @@ class ProjectController extends Controller
             $data['user_id'] => ['project_role' => $data['project_role'] ?? 'member'],
         ]);
 
+        ActivityLogService::memberAdded($project, $data['user_id'], $data['project_role'] ?? 'member');
+
         return response()->json([
             'message' => 'Membre ajouté au projet.',
             'members' => ProjectMemberResource::collection($project->load('members')->members),
@@ -197,6 +331,8 @@ class ProjectController extends Controller
         }
 
         $project->members()->detach($userId);
+
+        ActivityLogService::memberRemoved($project, $userId);
 
         return response()->json(['message' => 'Membre retiré du projet.']);
     }

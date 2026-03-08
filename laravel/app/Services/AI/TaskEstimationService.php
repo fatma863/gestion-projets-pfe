@@ -14,10 +14,13 @@ class TaskEstimationService
      */
     public function estimate(Task $task): array
     {
+        // Normalise complexity: default to 5 if null
+        $complexity = $task->complexity ?? 5;
+
         $input = [
             'task_id'    => $task->id,
             'title'      => $task->title,
-            'complexity' => $task->complexity,
+            'complexity' => $complexity,
             'priority'   => $task->priority,
             'project_id' => $task->project_id,
         ];
@@ -43,39 +46,46 @@ class TaskEstimationService
         $method = 'default';
 
         // Strategy 1: Same complexity in same project (highest confidence)
-        $sameComplexity = $similarTasks->where('complexity', $task->complexity);
+        $sameComplexity = $similarTasks->where('complexity', $complexity);
         if ($sameComplexity->count() >= 2) {
             $estimatedHours = round($sameComplexity->avg('actual_hours'), 1);
             $confidence = min(0.9, 0.6 + ($sameComplexity->count() * 0.05));
             $method = 'same_complexity_same_project';
         }
         // Strategy 2: Same complexity across all projects
-        elseif ($allCompleted->where('complexity', $task->complexity)->count() >= 2) {
-            $pool = $allCompleted->where('complexity', $task->complexity);
+        elseif ($allCompleted->where('complexity', $complexity)->count() >= 2) {
+            $pool = $allCompleted->where('complexity', $complexity);
             $estimatedHours = round($pool->avg('actual_hours'), 1);
             $confidence = min(0.75, 0.45 + ($pool->count() * 0.03));
             $method = 'same_complexity_all_projects';
         }
-        // Strategy 3: Same priority in same project
+        // Strategy 3: Similar complexity range (±2) across all projects
+        elseif ($allCompleted->whereBetween('complexity', [max(1, $complexity - 2), $complexity + 2])->count() >= 2) {
+            $pool = $allCompleted->whereBetween('complexity', [max(1, $complexity - 2), $complexity + 2]);
+            $estimatedHours = round($pool->avg('actual_hours') * $this->complexityFactor($complexity) / $this->complexityFactor((int) round($pool->avg('complexity'))), 1);
+            $confidence = min(0.6, 0.35 + ($pool->count() * 0.03));
+            $method = 'similar_complexity_range';
+        }
+        // Strategy 4: Same priority in same project
         elseif ($similarTasks->where('priority', $task->priority)->count() >= 2) {
             $pool = $similarTasks->where('priority', $task->priority);
             $estimatedHours = round($pool->avg('actual_hours'), 1);
             $confidence = min(0.65, 0.4 + ($pool->count() * 0.03));
             $method = 'same_priority_same_project';
         }
-        // Strategy 4: Global average scaled by complexity
-        elseif ($allCompleted->count() >= 3) {
+        // Strategy 5: Global average scaled by complexity
+        elseif ($allCompleted->count() >= 1) {
             $globalAvg = $allCompleted->avg('actual_hours');
-            $complexityFactor = $this->complexityFactor($task->complexity);
+            $complexityFactor = $this->complexityFactor($complexity);
             $estimatedHours = round($globalAvg * $complexityFactor, 1);
-            $confidence = 0.35;
+            $confidence = min(0.4, 0.25 + ($allCompleted->count() * 0.03));
             $method = 'global_average_scaled';
         }
-        // Fallback: Complexity-based default
+        // Fallback: Complexity-based estimation (no historical data needed)
         else {
-            $estimatedHours = $this->defaultEstimate($task->complexity);
+            $estimatedHours = $this->defaultEstimate($complexity);
             $confidence = 0.2;
-            $method = 'complexity_default';
+            $method = 'complexity_fallback';
         }
 
         // Estimate days (assuming 6h productive per day)
@@ -128,9 +138,11 @@ class TaskEstimationService
 
     private function getSampleSize(string $method, Task $task, $similar, $all): int
     {
+        $complexity = $task->complexity ?? 5;
         return match($method) {
-            'same_complexity_same_project' => $similar->where('complexity', $task->complexity)->count(),
-            'same_complexity_all_projects' => $all->where('complexity', $task->complexity)->count(),
+            'same_complexity_same_project' => $similar->where('complexity', $complexity)->count(),
+            'same_complexity_all_projects' => $all->where('complexity', $complexity)->count(),
+            'similar_complexity_range'     => $all->whereBetween('complexity', [max(1, $complexity - 2), $complexity + 2])->count(),
             'same_priority_same_project'   => $similar->where('priority', $task->priority)->count(),
             'global_average_scaled'        => $all->count(),
             default => 0,
@@ -139,9 +151,11 @@ class TaskEstimationService
 
     private function getRange(string $method, Task $task, $similar, $all): ?array
     {
+        $complexity = $task->complexity ?? 5;
         $pool = match($method) {
-            'same_complexity_same_project' => $similar->where('complexity', $task->complexity),
-            'same_complexity_all_projects' => $all->where('complexity', $task->complexity),
+            'same_complexity_same_project' => $similar->where('complexity', $complexity),
+            'same_complexity_all_projects' => $all->where('complexity', $complexity),
+            'similar_complexity_range'     => $all->whereBetween('complexity', [max(1, $complexity - 2), $complexity + 2]),
             'same_priority_same_project'   => $similar->where('priority', $task->priority),
             'global_average_scaled'        => $all,
             default => collect(),

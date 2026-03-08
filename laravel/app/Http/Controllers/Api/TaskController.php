@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Task\StoreTaskRequest;
+use App\Http\Requests\Task\UpdateTaskRequest;
 use App\Http\Resources\AttachmentResource;
 use App\Http\Resources\CommentResource;
 use App\Http\Resources\TaskAssigneeResource;
@@ -20,9 +22,42 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use App\Services\NotificationService;
+use App\Services\ActivityLogService;
+use App\Services\AI\TaskEstimationService;
+use App\Services\AI\DelayRiskService;
 
 class TaskController extends Controller
 {
+    // ─── ALL USER TASKS (cross-project) ─────────────────
+
+    public function myTasks(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        $query = Task::with(['status', 'creator', 'assignees', 'project:id,name,code'])
+            ->when($request->filled('priority'), fn ($q) => $q->where('priority', $request->priority))
+            ->when($request->filled('search'), fn ($q) => $q->where('title', 'like', "%{$request->search}%"))
+            ->orderByDesc('updated_at');
+
+        if ($user->hasRole('admin')) {
+            // Admin sees all tasks
+        } else {
+            // Other roles: tasks from their projects or assigned to them
+            $query->where(function ($q) use ($user) {
+                $q->whereHas('assignees', fn ($q2) => $q2->where('users.id', $user->id))
+                  ->orWhere('created_by', $user->id)
+                  ->orWhereHas('project', fn ($q2) =>
+                      $q2->whereHas('members', fn ($q3) => $q3->where('user_id', $user->id))
+                  );
+            });
+        }
+
+        $tasks = $query->get();
+
+        return response()->json(['tasks' => TaskResource::collection($tasks)]);
+    }
+
     // ─── CRUD ────────────────────────────────────────────
 
     public function index(Request $request, Project $project): JsonResponse
@@ -73,22 +108,11 @@ class TaskController extends Controller
         ]);
     }
 
-    public function store(Request $request, Project $project): JsonResponse
+    public function store(StoreTaskRequest $request, Project $project): JsonResponse
     {
-        Gate::authorize('update', $project);
+        Gate::authorize('view', $project);
 
-        $data = $request->validate([
-            'title'           => 'required|string|max:255',
-            'description'     => 'nullable|string',
-            'status_id'       => 'required|exists:task_statuses,id',
-            'priority'        => 'sometimes|in:low,medium,high,urgent',
-            'complexity'      => 'nullable|integer|min:1|max:10',
-            'planned_start'   => 'nullable|date',
-            'planned_end'     => 'nullable|date|after_or_equal:planned_start',
-            'due_date'        => 'nullable|date',
-            'estimated_hours' => 'nullable|numeric|min:0',
-            'parent_id'       => 'nullable|exists:tasks,id',
-        ]);
+        $data = $request->validated();
 
         $maxOrder = $project->tasks()
             ->where('status_id', $data['status_id'])
@@ -100,8 +124,20 @@ class TaskController extends Controller
         $task = $project->tasks()->create($data);
         $task->load(['status', 'creator', 'assignees']);
 
+        // Auto AI estimation if no estimated_hours provided
+        if (!$task->estimated_hours) {
+            try {
+                $estimation = app(TaskEstimationService::class)->estimate($task);
+                $task->update(['estimated_hours' => $estimation['estimated_hours']]);
+                $task->refresh();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Auto estimation failed', ['task_id' => $task->id, 'error' => $e->getMessage()]);
+            }
+        }
+
+        ActivityLogService::taskCreated($task);
+
         return response()->json([
-            'message' => 'Tâche créée.',
             'task' => new TaskResource($task),
         ], 201);
     }
@@ -120,28 +156,29 @@ class TaskController extends Controller
         return response()->json(['task' => new TaskResource($task)]);
     }
 
-    public function update(Request $request, Task $task): JsonResponse
+    public function update(UpdateTaskRequest $request, Task $task): JsonResponse
     {
-        Gate::authorize('update', $task);
-
-        $data = $request->validate([
-            'title'           => 'sometimes|required|string|max:255',
-            'description'     => 'nullable|string',
-            'status_id'       => 'sometimes|exists:task_statuses,id',
-            'priority'        => 'sometimes|in:low,medium,high,urgent',
-            'complexity'      => 'nullable|integer|min:1|max:10',
-            'planned_start'   => 'nullable|date',
-            'planned_end'     => 'nullable|date|after_or_equal:planned_start',
-            'due_date'        => 'nullable|date',
-            'estimated_hours' => 'nullable|numeric|min:0',
-            'actual_hours'    => 'nullable|numeric|min:0',
-            'progress_percent'=> 'nullable|integer|min:0|max:100',
-            'parent_id'       => 'nullable|exists:tasks,id',
-        ]);
-
+        $data = $request->validated();
         $data['updated_by'] = Auth::id();
+
+        $changed = array_keys(array_diff_assoc($data, $task->only(array_keys($data))));
         $task->update($data);
         $task->load(['status', 'creator', 'assignees']);
+
+        ActivityLogService::taskUpdated($task, $changed);
+
+        // Auto risk analysis on meaningful changes
+        $riskTriggers = ['progress_percent', 'due_date', 'planned_end', 'estimated_hours', 'status_id'];
+        if (array_intersect($changed, $riskTriggers)) {
+            try {
+                $risk = app(DelayRiskService::class)->analyzeTask($task);
+                if (in_array($risk['risk_level'] ?? '', ['high', 'critical'])) {
+                    NotificationService::delayRiskDetected($task, $risk['risk_level'], $risk['risk_score'] ?? 0);
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('Auto risk analysis failed', ['task_id' => $task->id, 'error' => $e->getMessage()]);
+            }
+        }
 
         return response()->json([
             'message' => 'Tâche mise à jour.',
@@ -152,6 +189,7 @@ class TaskController extends Controller
     public function destroy(Task $task): JsonResponse
     {
         Gate::authorize('delete', $task);
+        ActivityLogService::taskDeleted($task);
         $task->delete();
         return response()->json(['message' => 'Tâche supprimée.']);
     }
@@ -173,11 +211,16 @@ class TaskController extends Controller
             ->where('kanban_order', '>=', $data['kanban_order'])
             ->increment('kanban_order');
 
+        $oldStatusName = $task->status?->name ?? '?';
+
         $task->update([
             'status_id'    => $data['status_id'],
             'kanban_order'   => $data['kanban_order'],
             'updated_by'     => Auth::id(),
         ]);
+
+        $newStatusName = $task->fresh('status')->status?->name ?? '?';
+        ActivityLogService::taskMoved($task, $oldStatusName, $newStatusName);
 
         return response()->json([
             'message' => 'Tâche déplacée.',
@@ -213,6 +256,8 @@ class TaskController extends Controller
                 'assigned_at'        => now(),
             ]
         );
+
+        NotificationService::taskAssigned($task, $data['user_id']);
 
         return response()->json([
             'message' => 'Assignation effectuée.',
@@ -299,6 +344,10 @@ class TaskController extends Controller
     {
         Gate::authorize('view', $task);
 
+        if (Auth::user()->hasRole('viewer')) {
+            abort(403, 'Les viewers ne peuvent pas ajouter de commentaires.');
+        }
+
         $data = $request->validate([
             'body' => 'required|string',
         ]);
@@ -307,6 +356,9 @@ class TaskController extends Controller
             'user_id' => Auth::id(),
             'body'    => $data['body'],
         ]);
+
+        NotificationService::taskCommented($task, $comment->load('user'));
+        ActivityLogService::commentAdded($task, $comment);
 
         return response()->json([
             'message' => 'Commentaire ajouté.',
@@ -343,6 +395,10 @@ class TaskController extends Controller
     public function addAttachment(Request $request, Task $task): JsonResponse
     {
         Gate::authorize('view', $task);
+
+        if (Auth::user()->hasRole('viewer')) {
+            abort(403, 'Les viewers ne peuvent pas ajouter de pièces jointes.');
+        }
 
         $data = $request->validate([
             'type' => 'required|in:file,link',
@@ -412,6 +468,10 @@ class TaskController extends Controller
     {
         Gate::authorize('view', $task);
 
+        if (Auth::user()->hasRole('viewer')) {
+            abort(403, 'Les viewers ne peuvent pas ajouter de temps.');
+        }
+
         $data = $request->validate([
             'source'  => 'sometimes|in:manual,timer',
             'date'    => 'required|date',
@@ -422,6 +482,8 @@ class TaskController extends Controller
         $data['user_id'] = Auth::id();
 
         $entry = $task->timeEntries()->create($data);
+
+        ActivityLogService::timeEntryAdded($task, $entry);
 
         return response()->json([
             'message' => 'Entrée de temps ajoutée.',

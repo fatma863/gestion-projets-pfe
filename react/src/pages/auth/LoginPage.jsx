@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
+import { getDefaultRoute } from '../../routes/guards';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -20,8 +21,8 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
-      navigate('/dashboard');
+      const data = await login(email, password);
+      navigate(getDefaultRoute(data.user));
     } catch (err) {
       setError(err.response?.data?.message || 'Erreur de connexion');
     } finally {

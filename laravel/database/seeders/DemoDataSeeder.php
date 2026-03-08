@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\Attachment;
+use App\Models\Notification;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\TaskComment;
@@ -426,5 +427,65 @@ class DemoDataSeeder extends Seeder
                 'kanban_order' => 0,
             ]
         );
+
+        // ── Notifications ───────────────────────────────
+        $notifSamples = [
+            [
+                'user_id' => $admin->id,
+                'type'    => 'task_assigned',
+                'title'   => 'Nouvelle assignation',
+                'message' => "Vous avez été assigné(e) à la tâche « Conception de la base de données » dans le projet « {$project1->name} ».",
+                'data'    => ['task_id' => 2, 'project_id' => $project1->id],
+            ],
+            [
+                'user_id' => $admin->id,
+                'type'    => 'task_commented',
+                'title'   => 'Nouveau commentaire',
+                'message' => "{$manager->name} a commenté la tâche « CRUD Projets (API) ».",
+                'data'    => ['task_id' => 4, 'project_id' => $project1->id, 'comment_id' => 1],
+            ],
+            [
+                'user_id' => $admin->id,
+                'type'    => 'project_updated',
+                'title'   => 'Projet mis à jour',
+                'message' => "Le projet « {$project2->name} » a été mis à jour.",
+                'data'    => ['project_id' => $project2->id],
+            ],
+            [
+                'user_id' => $admin->id,
+                'type'    => 'delay_risk',
+                'title'   => 'Risque de retard',
+                'message' => "La tâche « API Authentification » présente un risque de retard élevé (score : 72).",
+                'data'    => ['task_id' => 3, 'project_id' => $project1->id, 'risk_level' => 'high', 'risk_score' => 72],
+            ],
+            [
+                'user_id' => $admin->id,
+                'type'    => 'deadline_approaching',
+                'title'   => 'Échéance proche',
+                'message' => "La tâche « CRUD Tâches (API) » arrive à échéance le 10/03/2026.",
+                'data'    => ['task_id' => 5, 'project_id' => $project1->id],
+            ],
+            [
+                'user_id' => $dev1->id,
+                'type'    => 'task_assigned',
+                'title'   => 'Nouvelle assignation',
+                'message' => "Vous avez été assigné(e) à la tâche « Mise en place de l'architecture backend » dans le projet « {$project1->name} ».",
+                'data'    => ['task_id' => 1, 'project_id' => $project1->id],
+            ],
+            [
+                'user_id' => $manager->id,
+                'type'    => 'project_updated',
+                'title'   => 'Projet mis à jour',
+                'message' => "Le projet « {$project1->name} » a été mis à jour.",
+                'data'    => ['project_id' => $project1->id],
+            ],
+        ];
+
+        foreach ($notifSamples as $notif) {
+            Notification::firstOrCreate(
+                ['user_id' => $notif['user_id'], 'type' => $notif['type'], 'message' => $notif['message']],
+                $notif,
+            );
+        }
     }
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
+import { getDefaultRoute } from '../../routes/guards';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
@@ -21,8 +22,8 @@ export default function RegisterPage() {
     setErrors({});
     setLoading(true);
     try {
-      await register(form.name, form.email, form.password, form.password_confirmation);
-      navigate('/dashboard');
+      const data = await register(form.name, form.email, form.password, form.password_confirmation);
+      navigate(getDefaultRoute(data.user));
     } catch (err) {
       if (err.response?.data?.errors) {
         setErrors(err.response.data.errors);

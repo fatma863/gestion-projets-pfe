@@ -14,7 +14,7 @@ export default function NotFoundPage() {
           Désolé, la page que vous recherchez n'existe pas ou a été déplacée.
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Link to="/dashboard">
+          <Link to="/">
             <Button>
               <Home className="mr-2 h-4 w-4" /> Tableau de bord
             </Button>

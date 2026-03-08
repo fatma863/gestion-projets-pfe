@@ -18,8 +18,9 @@ class ProjectPolicy
             return true;
         }
 
-        return $project->members()->where('user_id', $user->id)->exists()
-            || $project->owner_id === $user->id;
+        return $project->manager_id === $user->id
+            || $project->owner_id === $user->id
+            || $project->members()->where('user_id', $user->id)->exists();
     }
 
     public function create(User $user): bool
@@ -33,12 +34,15 @@ class ProjectPolicy
             return true;
         }
 
+        if ($project->manager_id === $user->id || $project->owner_id === $user->id) {
+            return true;
+        }
+
         $memberRole = $project->members()
             ->where('user_id', $user->id)
             ->first()?->pivot?->project_role;
 
-        return in_array($memberRole, ['owner', 'manager'])
-            || $project->owner_id === $user->id;
+        return in_array($memberRole, ['owner', 'manager']);
     }
 
     public function delete(User $user, Project $project): bool
@@ -47,6 +51,7 @@ class ProjectPolicy
             return true;
         }
 
-        return $project->owner_id === $user->id;
+        return $project->owner_id === $user->id
+            || $project->manager_id === $user->id;
     }
 }

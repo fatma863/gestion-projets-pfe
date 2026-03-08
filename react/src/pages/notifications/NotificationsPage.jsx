@@ -1,31 +1,17 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Bell, Check, CheckCheck } from 'lucide-react';
+import { useNotifications, useMarkNotificationRead, useMarkAllNotificationsRead } from '../../hooks/useNotifications';
 
 export default function NotificationsPage() {
-  const queryClient = useQueryClient();
+  const { data, isLoading } = useNotifications({ perPage: 50 });
+  const markReadMutation = useMarkNotificationRead();
+  const markAllMutation = useMarkAllNotificationsRead();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => api.get('/notifications?per_page=50').then((r) => r.data),
-  });
-
-  const markReadMutation = useMutation({
-    mutationFn: (id) => api.patch(`/notifications/${id}/read`),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
-  });
-
-  const markAllMutation = useMutation({
-    mutationFn: () => api.post('/notifications/read-all'),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
-  });
-
-  const notifications = data?.data || [];
-  const unreadCount = notifications.filter((n) => !n.read_at).length;
+  const notifications = data?.notifications || [];
+  const unreadCount = data?.unread_count ?? notifications.filter((n) => !n.read_at).length;
 
   return (
     <div className="space-y-6">
@@ -36,11 +22,9 @@ export default function NotificationsPage() {
             {unreadCount > 0 ? `${unreadCount} non lue(s)` : 'Toutes lues'}
           </p>
         </div>
-        {unreadCount > 0 && (
-          <Button variant="outline" onClick={() => markAllMutation.mutate()} disabled={markAllMutation.isPending}>
-            <CheckCheck className="mr-2 h-4 w-4" /> Tout marquer comme lu
-          </Button>
-        )}
+        <Button variant="outline" onClick={() => markAllMutation.mutate()} disabled={unreadCount === 0 || markAllMutation.isPending}>
+          <CheckCheck className="mr-2 h-4 w-4" /> Tout marquer comme lu
+        </Button>
       </div>
 
       {isLoading ? (
@@ -67,10 +51,10 @@ export default function NotificationsPage() {
                 <div className={`mt-0.5 h-2.5 w-2.5 flex-shrink-0 rounded-full ${notif.read_at ? 'bg-muted' : 'bg-primary'}`} />
                 <div>
                   <p className="text-sm font-medium text-foreground">
-                    {notif.data?.message || notif.data?.title || notif.type}
+                    {notif.title || notif.type}
                   </p>
-                  {notif.data?.body && (
-                    <p className="mt-0.5 text-sm text-muted-foreground">{notif.data.body}</p>
+                  {notif.message && (
+                    <p className="mt-0.5 text-sm text-muted-foreground">{notif.message}</p>
                   )}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {new Date(notif.created_at).toLocaleDateString('fr-FR', {
@@ -79,16 +63,21 @@ export default function NotificationsPage() {
                   </p>
                 </div>
               </div>
-              {!notif.read_at && (
+              <div className="flex items-center gap-2 shrink-0">
+                {notif.read_at && (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Lu</span>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => markReadMutation.mutate(notif.id)}
-                  disabled={markReadMutation.isPending}
+                  disabled={!!notif.read_at || markReadMutation.isPending}
+                  className={notif.read_at ? 'opacity-50 cursor-not-allowed' : ''}
                 >
                   <Check className="h-4 w-4" />
+                  <span className="ml-1 text-xs">Marquer comme lu</span>
                 </Button>
-              )}
+              </div>
             </div>
           ))}
         </div>

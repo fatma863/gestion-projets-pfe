@@ -1,8 +1,10 @@
+import { forwardRef } from 'react';
 import { cn } from '../../lib/utils';
 
-function Textarea({ className, ...props }) {
+const Textarea = forwardRef(({ className, ...props }, ref) => {
   return (
     <textarea
+      ref={ref}
       className={cn(
         'flex min-h-[80px] w-full rounded-md border border-input bg-white px-3 py-2 text-sm',
         'placeholder:text-muted-foreground',
@@ -13,6 +15,7 @@ function Textarea({ className, ...props }) {
       {...props}
     />
   );
-}
+});
 
+Textarea.displayName = 'Textarea';
 export { Textarea };

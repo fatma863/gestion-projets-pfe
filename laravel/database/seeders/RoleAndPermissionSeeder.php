@@ -24,6 +24,10 @@ class RoleAndPermissionSeeder extends Seeder
             'manage-time-entries',
             'view-reports',
             'use-ai-features',
+            'manage-notifications',
+            'manage-statuses',
+            'export-data',
+            'manage-settings',
         ];
 
         foreach ($permissions as $permission) {
@@ -44,6 +48,8 @@ class RoleAndPermissionSeeder extends Seeder
             'manage-time-entries',
             'view-reports',
             'use-ai-features',
+            'manage-statuses',
+            'export-data',
         ]);
 
         $member = Role::firstOrCreate(['name' => 'member']);

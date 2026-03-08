@@ -61,7 +61,7 @@ export default function LandingPage() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-white font-bold text-sm">
               GP
             </div>
-            <span className="text-lg font-bold text-foreground">Gestion Projets PFE</span>
+            <span className="text-lg font-bold text-foreground">Gestion Projets</span>
           </div>
           <div className="flex items-center gap-3">
             <Link to="/login">
@@ -82,7 +82,7 @@ export default function LandingPage() {
         <div className="mx-auto max-w-7xl px-6 py-20 sm:py-28">
           <div className="mx-auto max-w-3xl text-center">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5 text-sm font-medium text-primary">
-              <Zap className="h-4 w-4" /> Projet de Fin d'Études
+              <Zap className="h-4 w-4" /> Système Intelligent
             </div>
             <h1 className="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl lg:text-6xl">
               Gérez vos projets{' '}
@@ -91,13 +91,12 @@ export default function LandingPage() {
               </span>
             </h1>
             <p className="mt-6 text-lg text-muted-foreground sm:text-xl">
-              Une plateforme complète de gestion de projets inspirée de Monday.com, Trello et Gouti.
-              Kanban, Gantt, IA et collaboration en temps réel.
+              Une plateforme intelligente pour organiser, suivre et optimiser vos projets en équipe — avec Kanban, Gantt, IA et collaboration en temps réel.
             </p>
             <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
               <Link to="/register">
                 <Button size="lg" className="text-base px-8">
-                  Créer un compte gratuit <ArrowRight className="ml-2 h-4 w-4" />
+                  Commencer gratuitement <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </Link>
               <Link to="/login">
@@ -199,10 +198,10 @@ export default function LandingPage() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white font-bold text-xs">
                 GP
               </div>
-              <span className="text-sm font-semibold text-foreground">Gestion Projets PFE</span>
+              <span className="text-sm font-semibold text-foreground">Gestion Projets</span>
             </div>
             <p className="text-sm text-muted-foreground">
-              © {new Date().getFullYear()} Fatma Rejeb — Projet de Fin d'Études
+              © {new Date().getFullYear()} — Projet de Fin d'Études
             </p>
             <div className="flex gap-4">
               <Clock className="h-4 w-4 text-muted-foreground" />

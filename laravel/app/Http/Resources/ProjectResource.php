@@ -19,6 +19,8 @@ class ProjectResource extends JsonResource
             'start_date' => $this->start_date?->toDateString(),
             'end_date' => $this->end_date?->toDateString(),
             'owner' => new UserResource($this->whenLoaded('owner')),
+            'manager_id' => $this->manager_id,
+            'manager' => new UserResource($this->whenLoaded('manager')),
             'team' => new TeamResource($this->whenLoaded('team')),
             'members' => ProjectMemberResource::collection($this->whenLoaded('members')),
             'members_count' => $this->whenCounted('members'),

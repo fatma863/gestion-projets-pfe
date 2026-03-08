@@ -175,9 +175,10 @@ class AssignmentOptimizerService
      */
     private function experienceScore(User $user, Task $task): float
     {
+        $complexity = $task->complexity ?? 5;
         $completedSimilar = $user->assignedTasks()
             ->where('progress_percent', 100)
-            ->whereBetween('complexity', [max(1, $task->complexity - 2), $task->complexity + 2])
+            ->whereBetween('complexity', [max(1, $complexity - 2), $complexity + 2])
             ->count();
 
         return min(100, $completedSimilar * 25);

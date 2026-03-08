@@ -1,0 +1,629 @@
+================================================================================
+          GESTION DES PROJETS PFE — DESCRIPTION COMPLÈTE DU PROJET
+================================================================================
+
+Auteur : Fatma Rejeb
+Type   : Projet de Fin d'Études (PFE)
+Date   : 2026
+
+================================================================================
+1. OBJECTIF DU PROJET
+================================================================================
+
+Développer une application web full-stack de gestion de projets collaboratifs
+intégrant des recommandations basées sur l'intelligence artificielle.
+
+L'application permet de :
+  - Créer et gérer des projets, équipes et tâches
+  - Suivre l'avancement via tableau Kanban et diagramme de Gantt
+  - Gérer les dépendances entre tâches
+  - Enregistrer le temps (time tracking)
+  - Recevoir des notifications en temps réel
+  - Bénéficier de recommandations IA (estimation, détection de retards,
+    optimisation d'assignations)
+  - Contrôler les accès grâce au système RBAC (Role-Based Access Control)
+
+================================================================================
+2. STACK TECHNIQUE
+================================================================================
+
+BACKEND :
+  - PHP 8.2+
+  - Laravel 12
+  - Laravel Sanctum (authentification API via tokens)
+  - Spatie Laravel-Permission 6.24 (RBAC : rôles et permissions)
+  - MySQL 8+ (base de données)
+  - Eloquent ORM (modèles, relations, soft deletes)
+
+FRONTEND :
+  - React 19
+  - Vite 7.3.1 (build tool)
+  - React Router 7 (routing SPA)
+  - TanStack React Query 5 (gestion de cache et état serveur)
+  - Tailwind CSS 4 (styles utilitaires)
+  - Zod 4.3.6 (validation de formulaires)
+  - Axios (requêtes HTTP)
+  - Lucide React (icônes)
+  - Recharts (graphiques dans le dashboard)
+
+OUTILS :
+  - Composer (dépendances PHP)
+  - npm (dépendances JS)
+  - PHPUnit (tests backend — 39 tests RBAC)
+  - ESLint (qualité du code frontend)
+
+================================================================================
+3. MODÈLES DE DONNÉES (12 modèles Eloquent)
+================================================================================
+
+USER
+  Champs : name, email, password, avatar
+  Relations : belongsToMany(Team), belongsToMany(Project), hasMany(Task),
+              hasMany(TaskComment), hasMany(TimeEntry)
+  Traits : HasRoles (Spatie), SoftDeletes
+
+TEAM
+  Champs : name, description
+  Relations : belongsToMany(User) avec pivot (role, joined_at),
+              hasMany(Project)
+
+PROJECT
+  Champs : name, code, description, team_id, owner_id, status (enum),
+           start_date, end_date, settings (JSON)
+  Relations : belongsTo(Team), belongsTo(User owner),
+              belongsToMany(User members) avec pivot (role, joined_at),
+              hasMany(Task), hasMany(TaskStatus)
+  Statuts : planning, active, on_hold, completed, archived
+
+TASK
+  Champs : project_id, status_id, created_by, title, description,
+           priority (enum), start_date, due_date, estimated_hours,
+           actual_hours, position, progress (0-100), metadata (JSON)
+  Relations : belongsTo(Project), belongsTo(TaskStatus), belongsTo(User),
+              belongsToMany(User assignees), belongsToMany(Task dependencies),
+              hasMany(TaskComment), hasMany(Attachment), hasMany(TimeEntry)
+  Priorités : low, medium, high, urgent
+
+TASK_STATUS
+  Champs : project_id, name, slug, color, position, is_default, is_closed
+
+TASK_DEPENDENCY
+  Champs : task_id, dependency_id, type (finish_to_start, etc.)
+
+TASK_COMMENT
+  Champs : task_id, user_id, content
+
+TASK_ASSIGNMENT
+  Champs : task_id, user_id, assigned_by, role, assigned_at
+
+ATTACHMENT
+  Champs : task_id, user_id, filename, path, mime_type, size
+
+TIME_ENTRY
+  Champs : task_id, user_id, hours, description, date
+
+NOTIFICATION
+  Champs : user_id, type, title, message, data (JSON), read_at
+
+AI_RECOMMENDATION
+  Champs : project_id, task_id, user_id, type, title, description,
+           confidence, data (JSON), status, applied_at
+
+================================================================================
+4. FONCTIONNALITÉS PRINCIPALES
+================================================================================
+
+A) GESTION DE PROJETS
+   - Créer, modifier, supprimer des projets (managers+)
+   - Tableau de bord projet (KPIs : tâches par statut, charge, progression)
+   - Gestion des membres (ajout/retrait avec rôles : lead, developer, etc.)
+   - Statuts personnalisables par projet (Kanban colonnes)
+   - Filtrage visible selon le rôle (admin voit tout, membre voit ses projets)
+
+B) TABLEAU KANBAN
+   - Colonnes personnalisées par projet (TaskStatus)
+   - Glisser-déposer des tâches entre colonnes (drag & drop)
+   - Création rapide de tâches
+   - Détail complet : description, priorité, assignés, commentaires,
+     pièces jointes, entrées de temps, progression
+
+C) GESTION DES ÉQUIPES
+   - CRUD d'équipes (managers+)
+   - Ajout/retrait de membres avec rôles et date d'arrivée
+   - Capacité et compétences par membre (JSON pivot)
+   - Filtrage selon le rôle (admin voit tout, manager voit ses équipes)
+
+D) DIAGRAMME DE GANTT
+   - Vue chronologique des tâches par projet
+   - Dépendances visualisées
+   - Modification des dates (managers+)
+
+E) DÉPENDANCES DE TÂCHES
+   - Types : finish_to_start, start_to_start, finish_to_finish, start_to_finish
+   - Ajout/suppression (managers+)
+   - Lecture disponible pour tous les membres
+
+F) COLLABORATION
+   - Commentaires sur les tâches (membre+ seulement, viewer bloqué)
+   - Pièces jointes (upload fichiers, viewer bloqué)
+   - Time tracking (entrées de temps, viewer bloqué)
+   - Assignation de tâches à un ou plusieurs utilisateurs
+
+G) NOTIFICATIONS
+   - Notification automatique lors d'événements (assignation, commentaire, etc.)
+   - Interface : liste paginée, marquer comme lu, tout marquer lu
+   - Mise à jour optimiste du cache (pas de disparition à la relecture)
+
+H) AUTHENTIFICATION & SÉCURITÉ
+   - Inscription / connexion via Sanctum (token Bearer)
+   - Middleware « auth:sanctum » sur toutes les routes protégées
+   - Middleware Spatie « role: » et « permission: » sur les groupes de routes
+   - Policies Laravel (ProjectPolicy, TaskPolicy, TeamPolicy) pour l'autorisation
+   - Viewer explicitement bloqué sur les actions d'écriture (commentaires,
+     pièces jointes, time entries) même sur les routes « ouvertes »
+
+================================================================================
+5. SYSTÈME RBAC (Role-Based Access Control)
+================================================================================
+
+ARCHITECTURE : 3 espaces séparés dans le frontend, sécurisés par le backend.
+
+RÔLES (4) :
+  admin   — Accès total, gestion des utilisateurs, statistiques globales
+  manager — Gestion de projets/équipes/tâches, IA avancée
+  member  — Travail sur les tâches, IA basique, time tracking
+  viewer  — Lecture seule uniquement
+
+PERMISSIONS (14) :
+  ┌─────────────────────┬───────┬─────────┬────────┬────────┐
+  │ Permission          │ Admin │ Manager │ Member │ Viewer │
+  ├─────────────────────┼───────┼─────────┼────────┼────────┤
+  │ manage-users        │   ✓   │         │        │        │
+  │ manage-teams        │   ✓   │    ✓    │        │        │
+  │ manage-projects     │   ✓   │    ✓    │        │        │
+  │ manage-all-projects │   ✓   │         │        │        │
+  │ view-projects       │   ✓   │    ✓    │   ✓    │   ✓    │
+  │ manage-tasks        │   ✓   │    ✓    │   ✓    │        │
+  │ view-tasks          │   ✓   │    ✓    │   ✓    │   ✓    │
+  │ manage-time-entries │   ✓   │    ✓    │   ✓    │        │
+  │ view-reports        │   ✓   │    ✓    │   ✓    │   ✓    │
+  │ use-ai-features     │   ✓   │    ✓    │   ✓    │        │
+  │ manage-notifications│   ✓   │         │        │        │
+  │ manage-statuses     │   ✓   │    ✓    │        │        │
+  │ export-data         │   ✓   │    ✓    │        │        │
+  │ manage-settings     │   ✓   │         │        │        │
+  └─────────────────────┴───────┴─────────┴────────┴────────┘
+
+ROUTING FRONTEND — 3 ESPACES :
+  /admin/*    → Réservé au rôle admin
+                AdminLayout + AdminSidebar
+                Pages : AdminDashboardPage, UsersPage, AdminSettingsPage
+  /manager/*  → Admin OU manager
+                ManagerLayout + ManagerSidebar
+                Pages : ManagerDashboardPage, projets, équipes, Gantt, IA
+  /app/*      → Tous les rôles authentifiés
+                AppLayout + Sidebar classique
+                Pages : DashboardPage, projets, équipes, notifications, settings
+
+COMPOSANT WriteGuard :
+  Masque le contenu pour les viewers (les boutons « Créer », « Modifier »,
+  « Supprimer » sont invisibles pour les viewers).
+
+REDIRECTION AUTOMATIQUE :
+  Après login, l'utilisateur est redirigé vers son espace par défaut :
+    admin   → /admin/dashboard
+    manager → /manager/dashboard
+    member  → /app/dashboard
+    viewer  → /app/dashboard
+
+SÉCURITÉ BACKEND :
+  - Routes admin : middleware role:admin (/admin/stats, /admin/users)
+  - Routes manager+ : middleware role:admin|manager (CRUD projets/équipes,
+    assignation, dépendances, Gantt écriture, IA avancée)
+  - Routes générales auth : protégées par Policies (create/update/delete
+    contrôlés par TaskPolicy, ProjectPolicy, TeamPolicy)
+  - Viewer bloqué explicitement sur : addComment, addAttachment, addTimeEntry
+  - IA avancée (suggest-assignment, delay-risk/project) : managers+ uniquement
+  - IA optimisation (optimize-assignments) : admin uniquement
+  - IA basique (estimate, delay-risk/task) : permission use-ai-features
+
+POLICIES :
+  ProjectPolicy :
+    viewAny → true (filtrage dans le controller)
+    view    → admin OU membre du projet OU owner
+    create  → permission manage-projects
+    update  → admin OU manage-all-projects OU rôle projet (lead/manager)
+    delete  → admin OU owner du projet
+
+  TaskPolicy :
+    create  → bloqué pour viewer
+    update  → bloqué pour viewer, admin bypass
+    delete  → bloqué pour viewer, admin bypass
+
+  TeamPolicy :
+    viewAny → true
+    view    → admin OU membre de l'équipe
+    create  → permission manage-teams
+    update  → admin OU lead/manager dans l'équipe
+    delete  → admin OU lead de l'équipe
+
+TESTS :
+  39 tests PHPUnit (Feature/RbacTest.php) couvrant tous les scénarios :
+    - Admin bloque non-admin sur /admin/*
+    - Création projet/équipe par rôle
+    - Viewer bloqué sur création/modification/suppression de tâches
+    - Viewer bloqué sur commentaires et time entries
+    - IA segmentée par rôle (basique member+, avancée manager+, optimise admin)
+    - Gantt écriture manager+ uniquement
+    - Utilisateur non authentifié bloqué partout
+
+================================================================================
+6. SERVICES D'INTELLIGENCE ARTIFICIELLE
+================================================================================
+
+Trois services IA situés dans app/Services/AI/ :
+
+A) TaskEstimationService
+   Estime les heures nécessaires pour une tâche en analysant :
+     - Titre, description, priorité
+     - Historique des tâches similaires (même projet, mots-clés)
+     - Complexité moyenne du projet
+   Retourne : estimated_hours, confidence, facteurs
+
+B) DelayRiskService
+   Évalue le risque de retard pour une tâche ou un projet entier :
+     - Tâche : progression vs temps restant, heures réelles vs estimées,
+       dépendances en retard
+     - Projet : agrégation des risques tâches, chemin critique, vélocité
+   Retourne : risk_level (low/medium/high/critical), probability, facteurs,
+              recommandations
+
+C) AssignmentOptimizationService
+   Suggère le meilleur assigné pour une tâche ou optimise toutes les
+   assignations d'un projet :
+     - Analyse : charge actuelle, compétences (JSON), historique, disponibilité
+     - Scoring multicritère pondéré
+   Retourne : suggestions avec scores, raisons, plan d'optimisation
+
+ACCÈS :
+   member+  → estimation tâche, risque retard tâche
+   manager+ → risque retard projet, suggestion assignation
+   admin    → optimisation globale des assignations
+
+================================================================================
+7. ROUTES API COMPLÈTES
+================================================================================
+
+AUTHENTIFICATION :
+  POST   /api/auth/register              Inscription
+  POST   /api/auth/login                 Connexion
+  POST   /api/auth/logout                Déconnexion (auth)
+  GET    /api/me                         Profil utilisateur (auth)
+
+ADMIN (role:admin) :
+  GET    /api/admin/stats                Statistiques globales
+  GET    /api/admin/users                Liste des utilisateurs
+  POST   /api/admin/users                Créer utilisateur
+  GET    /api/admin/users/{id}           Détail utilisateur
+  PUT    /api/admin/users/{id}           Modifier utilisateur
+  DELETE /api/admin/users/{id}           Supprimer utilisateur
+  POST   /api/admin/users/{id}/role      Changer le rôle
+
+ÉQUIPES (role:admin|manager) :
+  GET    /api/teams                      Lister équipes
+  POST   /api/teams                      Créer équipe
+  GET    /api/teams/{id}                 Détail équipe
+  PUT    /api/teams/{id}                 Modifier équipe
+  DELETE /api/teams/{id}                 Supprimer équipe
+  POST   /api/teams/{id}/members         Ajouter membre
+  DELETE /api/teams/{id}/members/{user}  Retirer membre
+
+PROJETS — écriture (role:admin|manager) :
+  POST   /api/projects                   Créer projet
+  PUT    /api/projects/{id}              Modifier projet
+  DELETE /api/projects/{id}              Supprimer projet
+  POST   /api/projects/{id}/members      Ajouter membre
+  DELETE /api/projects/{id}/members/{u}  Retirer membre
+
+PROJETS — lecture (auth) :
+  GET    /api/projects                   Lister projets
+  GET    /api/projects/{id}              Détail projet
+  GET    /api/projects/{id}/dashboard    Dashboard projet
+  GET    /api/projects/{id}/members      Membres du projet
+
+STATUTS :
+  GET    /api/projects/{id}/statuses     Lister statuts (auth)
+  POST   /api/projects/{id}/statuses     Créer statut (manager+)
+  PUT    /api/statuses/{id}              Modifier statut (manager+)
+  DELETE /api/statuses/{id}              Supprimer statut (manager+)
+  POST   /api/projects/{id}/statuses/reorder  Réordonner (manager+)
+
+TÂCHES (protégées par Policy) :
+  GET    /api/tasks                      Mes tâches (cross-projet)
+  GET    /api/projects/{id}/tasks        Lister tâches du projet
+  POST   /api/projects/{id}/tasks        Créer tâche
+  GET    /api/tasks/{id}                 Détail tâche
+  PUT    /api/tasks/{id}                 Modifier tâche
+  DELETE /api/tasks/{id}                 Supprimer tâche
+  PATCH  /api/tasks/{id}/move            Déplacer (Kanban)
+
+ASSIGNATION (manager+) :
+  GET    /api/tasks/{id}/assignees       Assignés (auth)
+  POST   /api/tasks/{id}/assign          Assigner
+  DELETE /api/tasks/{id}/unassign/{user} Retirer
+
+DÉPENDANCES (manager+) :
+  GET    /api/tasks/{id}/dependencies    Dépendances (auth)
+  POST   /api/tasks/{id}/dependencies    Ajouter
+  DELETE /api/tasks/{id}/dependencies/{d} Retirer
+
+COMMENTAIRES (viewer bloqué en écriture) :
+  GET    /api/tasks/{id}/comments        Commentaires (auth)
+  POST   /api/tasks/{id}/comments        Ajouter (member+)
+  DELETE /api/tasks/{id}/comments/{c}    Supprimer (member+)
+
+PIÈCES JOINTES (viewer bloqué en écriture) :
+  GET    /api/tasks/{id}/attachments     Attachements (auth)
+  POST   /api/tasks/{id}/attachments     Ajouter (member+)
+  DELETE /api/tasks/{id}/attachments/{a} Supprimer (member+)
+
+TIME TRACKING (viewer bloqué en écriture) :
+  GET    /api/tasks/{id}/time-entries    Entrées temps (auth)
+  POST   /api/tasks/{id}/time-entries    Créer (member+)
+  DELETE /api/tasks/{id}/time-entries/{e} Supprimer (member+)
+
+GANTT :
+  GET    /api/projects/{id}/gantt        Données Gantt (auth)
+  PUT    /api/projects/{id}/gantt        Modifier dates (manager+)
+
+NOTIFICATIONS (auth) :
+  GET    /api/notifications              Notifications utilisateur
+  PATCH  /api/notifications/{id}/read    Marquer lue
+  POST   /api/notifications/read-all     Tout marquer lu
+
+INTELLIGENCE ARTIFICIELLE :
+  GET    /api/ai/estimate/{task}                  Estimation (member+)
+  GET    /api/ai/delay-risk/task/{task}           Risque tâche (member+)
+  GET    /api/ai/delay-risk/project/{project}     Risque projet (manager+)
+  GET    /api/ai/suggest-assignment/{task}        Suggestion (manager+)
+  GET    /api/ai/optimize-assignments/{project}   Optimisation (admin)
+
+================================================================================
+8. STRUCTURE FRONTEND (Pages et Navigation)
+================================================================================
+
+PAGES PUBLIQUES :
+  /                      LandingPage (page d'accueil)
+  /login                 LoginPage (connexion)
+  /register              RegisterPage (inscription)
+  /unauthorized          UnauthorizedPage (erreur 403)
+
+ESPACE ADMIN (/admin/*) — rôle admin uniquement :
+  /admin/dashboard       AdminDashboardPage (statistiques globales)
+  /admin/users           UsersPage (CRUD utilisateurs, changement de rôle)
+  /admin/teams           TeamsPage
+  /admin/projects        ProjectsPage
+  /admin/ai              AiPage (5 onglets IA)
+  /admin/settings        AdminSettingsPage (profil, rôles, système)
+
+ESPACE MANAGER (/manager/*) — admin OU manager :
+  /manager/dashboard     ManagerDashboardPage (aperçu projets/équipes)
+  /manager/projects      ProjectsPage
+  /manager/projects/:id  ProjectDetailPage (Kanban)
+  /manager/teams         TeamsPage
+  /manager/teams/:id     TeamDetailPage
+  /manager/gantt         GanttPage
+  /manager/ai            AiPage (4 onglets IA)
+  /manager/notifications NotificationsPage
+  /manager/settings      SettingsPage
+
+ESPACE APP (/app/*) — tous rôles authentifiés :
+  /app/dashboard         DashboardPage (KPIs personnels)
+  /app/projects          ProjectsPage
+  /app/projects/:id      ProjectDetailPage (Kanban)
+  /app/teams             TeamsPage
+  /app/teams/:id         TeamDetailPage
+  /app/gantt             GanttPage
+  /app/ai                AiPage (2 onglets pour member, 0 pour viewer)
+  /app/notifications     NotificationsPage
+  /app/settings          SettingsPage
+
+LAYOUTS :
+  AdminLayout + AdminSidebar   → sidebar spécialisée admin
+  ManagerLayout + ManagerSidebar → sidebar spécialisée manager
+  AppLayout + Sidebar           → sidebar standard
+
+COMPOSANTS CLÉS :
+  WriteGuard    → Masque le contenu pour les viewers (boutons CRUD)
+  RoleRoute     → Guard de route qui vérifie le rôle
+  RoleRedirect  → Redirige /dashboard vers l'espace approprié
+  usePermission → Hook : hasRole, hasPermission, isAdmin, isManager, isViewer
+  useSpacePrefix → Hook : retourne /admin, /manager ou /app selon l'URL
+
+================================================================================
+9. DONNÉES DE DÉMONSTRATION (Seeder)
+================================================================================
+
+COMPTES DE TEST :
+  Admin   : admin@gestion-projets.local   / password
+  Manager : manager@gestion-projets.local / password
+  Dev 1   : dev1@gestion-projets.local    / password
+  Dev 2   : dev2@gestion-projets.local    / password
+  Dev 3   : dev3@gestion-projets.local    / password
+
+ÉQUIPE : "Équipe Développement" avec 5 membres
+  - Capacités : 35-40 h/semaine
+  - Compétences : PHP, React, MySQL, DevOps, Gestion, Scrum, etc.
+
+PROJETS :
+  1. "Gestion des Projets PFE" (GPFE) — actif, 5 membres, 12 tâches
+  2. "Site Web Entreprise" (SITE) — en planification, 2 membres
+
+TÂCHES EXEMPLES (projet GPFE) :
+  - Architecture backend          (Terminé - 100%)
+  - Conception BDD                (Terminé - 100%)
+  - API Authentification          (En cours - 40%)
+  - CRUD Projets                  (À faire)
+  - CRUD Tâches                   (À faire)
+  - Interface Kanban              (À faire)
+  - Diagramme Gantt               (À faire)
+  - Module IA – Estimation        (À faire)
+  - Module IA – Détection Retards (À faire)
+  - Module IA – Optimisation      (À faire)
+  - Dashboard KPIs                (À faire)
+  - Time Tracking                 (À faire)
+
+DÉPENDANCES :
+  Task 3 (Auth)    → dépend de Task 1 (Architecture)
+  Task 4 (Projets) → dépend de Task 3 (Auth)
+  Task 5 (Tâches)  → dépend de Task 4 (Projets)
+  Task 6 (Kanban)  → dépend de Task 5 (Tâches)
+  Task 7 (Gantt)   → dépend de Task 5 (Tâches)
+
+================================================================================
+10. INSTALLATION RAPIDE
+================================================================================
+
+  # Base de données MySQL requise :
+  CREATE DATABASE gestion_projets_pfe
+  CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+  # Backend
+  cd laravel
+  composer install
+  cp .env.example .env
+  php artisan key:generate
+  php artisan migrate
+  php artisan db:seed
+  php artisan serve --port=8000
+
+  # Frontend
+  cd react
+  npm install
+  npm run dev
+
+================================================================================
+11. ARCHITECTURE GLOBALE
+================================================================================
+
+  ┌─────────────────────────────────────────────────────────┐
+  │  Frontend (React 19 + Vite 7)                           │
+  │  ├─ 3 Espaces : /admin, /manager, /app                 │
+  │  ├─ Pages (Dashboard, Projects, Kanban, Gantt, AI)      │
+  │  ├─ Routing (React Router v7 + Guards RBAC)             │
+  │  ├─ État (TanStack Query, AuthContext)                  │
+  │  ├─ Composants (WriteGuard, RoleRoute, Sidebars)        │
+  │  └─ HTTP (Axios → Sanctum tokens)                       │
+  └──────────────────┬──────────────────────────────────────┘
+                     │ API REST JSON
+  ┌──────────────────▼──────────────────────────────────────┐
+  │  Backend (Laravel 12)                                   │
+  │  ├─ Controllers (Project, Task, Team, AI, Notification) │
+  │  ├─ Admin Controllers (UserController, StatsController) │
+  │  ├─ Models (User, Team, Project, Task, Notification...) │
+  │  ├─ Services IA (Estimation, DelayRisk, Assignment)     │
+  │  ├─ Auth (Sanctum + Spatie Permission)                  │
+  │  ├─ Policies (ProjectPolicy, TaskPolicy, TeamPolicy)    │
+  │  ├─ Middleware (role, permission, role_or_permission)    │
+  │  └─ Tests (39 PHPUnit RBAC tests)                       │
+  └──────────────────┬──────────────────────────────────────┘
+                     │ Eloquent ORM
+  ┌──────────────────▼──────────────────────────────────────┐
+  │  Base de données (MySQL 8+)                             │
+  │  ├─ Users, Teams, Projects, Tasks                       │
+  │  ├─ Associations (team_user, project_members,           │
+  │  │   task_assignments)                                  │
+  │  ├─ Annexes (Comments, TimeEntries, Attachments, etc.)  │
+  │  └─ Spatie (roles, permissions, model_has_roles, etc.)  │
+  └─────────────────────────────────────────────────────────┘
+
+Patterns utilisés :
+  - MVC (Model-View-Controller)
+  - RESTful API (verbes HTTP, codes de statut)
+  - Service Layer (services IA découplés)
+  - Policy-based Authorization (Laravel Policies)
+  - RBAC (4 rôles, 14 permissions, Spatie)
+  - 3-Space Frontend Architecture (admin/manager/app)
+  - Soft Deletes (suppression logique)
+  - JSON Storage (metadata, settings, skills)
+  - Many-to-Many avec pivot data enrichi
+  - Optimistic UI Updates (notifications)
+  - Component Guards (WriteGuard, RoleRoute)
+
+================================================================================
+12. STRUCTURE DES FICHIERS PRINCIPAUX
+================================================================================
+
+BACKEND (laravel/) :
+  app/
+    Http/Controllers/Api/
+      AuthController.php          — Login, register, logout, me
+      ProjectController.php       — CRUD projet + membres + dashboard
+      TaskController.php          — CRUD tâche + sous-ressources + myTasks
+      TeamController.php          — CRUD équipe + membres
+      TaskStatusController.php    — CRUD statuts + reorder
+      GanttController.php         — Lecture + écriture Gantt
+      NotificationController.php  — Liste + mark read
+      AiController.php            — 5 endpoints IA
+      Admin/
+        UserController.php        — CRUD utilisateurs admin
+        StatsController.php       — Statistiques globales
+    Http/Requests/Task/
+      StoreTaskRequest.php        — Validation + autorisation création tâche
+    Models/                       — 12 modèles Eloquent
+    Policies/
+      ProjectPolicy.php           — Autorisation projets
+      TaskPolicy.php              — Autorisation tâches (viewer bloqué)
+      TeamPolicy.php              — Autorisation équipes
+    Services/AI/
+      TaskEstimationService.php   — Estimation IA
+      DelayRiskService.php        — Détection retards IA
+      AssignmentOptimizationService.php — Optimisation assignations IA
+  database/
+    migrations/                   — 12 fichiers de migration
+    seeders/
+      DatabaseSeeder.php          — Orchestrateur des seeders
+      RoleAndPermissionSeeder.php — 4 rôles, 14 permissions
+  routes/
+    api.php                       — Toutes les routes API (5 groupes)
+  tests/Feature/
+    RbacTest.php                  — 39 tests RBAC
+
+FRONTEND (react/src/) :
+  App.jsx                         — Routing principal (3 espaces)
+  contexts/AuthContext.jsx        — État d'authentification global
+  hooks/
+    usePermission.js              — Hook RBAC (hasRole, isAdmin, etc.)
+    useSpacePrefix.js             — Hook préfixe d'espace (/admin, etc.)
+  routes/
+    guards.jsx                    — ProtectedRoute, RoleRoute, RoleRedirect
+  components/
+    WriteGuard.jsx                — Masque contenu pour viewers
+    layout/
+      AdminLayout.jsx + AdminSidebar.jsx
+      ManagerLayout.jsx + ManagerSidebar.jsx
+      Sidebar.jsx                 — Sidebar espace /app
+      Topbar.jsx                  — Barre supérieure (rôle-aware)
+  pages/
+    admin/
+      AdminDashboardPage.jsx      — Stats globales admin
+      UsersPage.jsx               — Gestion utilisateurs
+      AdminSettingsPage.jsx       — Paramètres admin
+    manager/
+      ManagerDashboardPage.jsx    — Aperçu manager
+    dashboard/DashboardPage.jsx   — Dashboard personnel
+    projects/
+      ProjectsPage.jsx            — Liste projets (WriteGuard)
+      ProjectDetailPage.jsx       — Kanban + gestion (WriteGuard)
+    teams/
+      TeamsPage.jsx               — Liste équipes (WriteGuard)
+      TeamDetailPage.jsx          — Détail équipe
+    ai/AiPage.jsx                 — IA (onglets filtrés par rôle)
+    gantt/GanttPage.jsx           — Diagramme de Gantt
+    notifications/NotificationsPage.jsx
+    settings/SettingsPage.jsx
+    errors/UnauthorizedPage.jsx   — Page 403
+
+================================================================================
+                              FIN DU DOCUMENT
+================================================================================

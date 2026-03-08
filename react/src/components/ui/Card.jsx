@@ -1,8 +1,15 @@
 import { cn } from '../../lib/utils';
 
-function Card({ className, ...props }) {
+function Card({ className, hover = false, ...props }) {
   return (
-    <div className={cn('rounded-lg border border-border bg-card text-card-foreground shadow-sm', className)} {...props} />
+    <div
+      className={cn(
+        'rounded-xl border border-border bg-card text-card-foreground shadow-sm transition-all duration-200',
+        hover && 'hover:shadow-md hover:border-border/80 hover:-translate-y-0.5',
+        className
+      )}
+      {...props}
+    />
   );
 }
 
@@ -11,7 +18,7 @@ function CardHeader({ className, ...props }) {
 }
 
 function CardTitle({ className, ...props }) {
-  return <h3 className={cn('text-2xl font-semibold leading-none tracking-tight', className)} {...props} />;
+  return <h3 className={cn('text-lg font-semibold leading-none tracking-tight', className)} {...props} />;
 }
 
 function CardDescription({ className, ...props }) {
@@ -22,4 +29,8 @@ function CardContent({ className, ...props }) {
   return <div className={cn('p-6 pt-0', className)} {...props} />;
 }
 
-export { Card, CardHeader, CardTitle, CardDescription, CardContent };
+function CardFooter({ className, ...props }) {
+  return <div className={cn('flex items-center p-6 pt-0', className)} {...props} />;
+}
+
+export { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter };
