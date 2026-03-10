@@ -9,6 +9,7 @@ import { Input } from '../../components/ui/Input';
 import { Spinner } from '../../components/ui/Spinner';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { Avatar } from '../../components/ui/Avatar';
 import { motion } from 'framer-motion';
 import { Search, FolderKanban, Users, ListTodo, UserCheck } from 'lucide-react';
 
@@ -56,7 +57,7 @@ export default function MemberProjectsPage() {
                     {project.description && <p className="mb-3 line-clamp-2 text-sm text-muted-foreground">{project.description}</p>}
                     <ProgressBar value={project.progress_percent || 0} size="sm" showValue className="mb-2" />
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      {project.manager && <span className="flex items-center gap-1"><UserCheck className="h-3.5 w-3.5" /> {project.manager.name}</span>}
+                      {project.manager && <span className="flex items-center gap-1"><Avatar name={project.manager.name} src={project.manager.avatar} size="xs" /> {project.manager.name}</span>}
                       {project.team && <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {project.team.name}</span>}
                       <span className="flex items-center gap-1"><ListTodo className="h-3.5 w-3.5" /> {project.tasks_count || 0} tâches</span>
                     </div>

@@ -12,6 +12,8 @@ import {
   PanelLeft,
   ListTodo,
   Sparkles,
+  Layers,
+  Wrench,
 } from 'lucide-react';
 import { useState } from 'react';
 import { usePermission } from '../../hooks/usePermission';
@@ -33,9 +35,18 @@ const allSections = [
     ],
   },
   {
+    label: 'Scrum',
+    items: [
+      { to: '/app/sprints', icon: Layers, label: 'Sprints', match: '/app/sprints', hideForViewer: true },
+      { to: '/app/backlog', icon: ListTodo, label: 'Backlog', match: '/app/backlog', hideForViewer: true },
+      { to: '/app/scrum-board', icon: CalendarRange, label: 'Scrum Board', match: '/app/scrum-board', hideForViewer: true },
+    ],
+  },
+  {
     label: 'Outils',
     items: [
       { to: '/app/ai', icon: Sparkles, label: 'IA', match: '/app/ai', hideForViewer: true },
+      { to: '/app/tools', icon: Wrench, label: 'Outils', match: '/app/tools', hideForViewer: true },
       { to: '/app/notifications', icon: Bell, label: 'Notifications', match: '/app/notifications' },
     ],
   },

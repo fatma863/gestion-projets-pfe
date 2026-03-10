@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\TeamResource;
 use App\Http\Resources\TeamMemberResource;
 use App\Models\Team;
+use App\Models\Project;
+use App\Services\NotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -17,6 +19,7 @@ class TeamController extends Controller
         $user = $request->user();
 
         $query = Team::withCount('members', 'projects')
+            ->with(['members' => fn ($q) => $q->select('users.id', 'users.name', 'users.avatar')->limit(5)])
             ->when($request->search, fn ($q, $s) => $q->where('name', 'like', "%{$s}%"))
             ->orderBy('name');
 
@@ -55,7 +58,7 @@ class TeamController extends Controller
         Gate::authorize('view', $team);
 
         $team->loadCount('members', 'projects');
-        $team->load('members');
+        $team->load('members', 'projects');
 
         return response()->json(['team' => new TeamResource($team)]);
     }
@@ -106,6 +109,8 @@ class TeamController extends Controller
             ],
         ]);
 
+        NotificationService::memberAddedToTeam($team, $data['user_id']);
+
         return response()->json([
             'message' => 'Membre ajouté à l\'équipe.',
             'members' => TeamMemberResource::collection($team->load('members')->members),
@@ -119,5 +124,35 @@ class TeamController extends Controller
         $team->members()->detach($userId);
 
         return response()->json(['message' => 'Membre retiré de l\'équipe.']);
+    }
+
+    public function assignProject(Request $request, Team $team): JsonResponse
+    {
+        Gate::authorize('manageMember', $team);
+
+        $data = $request->validate([
+            'project_id' => 'required|exists:projects,id',
+        ]);
+
+        Project::where('id', $data['project_id'])->update(['team_id' => $team->id]);
+
+        $team->load('projects');
+        $team->loadCount('projects');
+
+        return response()->json([
+            'message' => 'Projet assigné à l\'équipe.',
+            'team' => new TeamResource($team),
+        ]);
+    }
+
+    public function removeProject(Team $team, Project $project): JsonResponse
+    {
+        Gate::authorize('manageMember', $team);
+
+        if ((int) $project->team_id === (int) $team->id) {
+            $project->update(['team_id' => null]);
+        }
+
+        return response()->json(['message' => 'Projet retiré de l\'équipe.']);
     }
 }

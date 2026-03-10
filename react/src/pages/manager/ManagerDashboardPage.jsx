@@ -10,11 +10,12 @@ import { MetricCard } from '../../components/ui/MetricCard';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { Avatar } from '../../components/ui/Avatar';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RTooltip } from 'recharts';
 import { motion } from 'framer-motion';
 import {
   FolderKanban, Users, AlertTriangle, ArrowRight, ListTodo,
-  TrendingUp, Flame, Clock, UsersRound, Brain, ShieldAlert,
+  TrendingUp, Flame, Clock, UsersRound, Brain, ShieldAlert, Activity,
 } from 'lucide-react';
 
 const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
@@ -41,6 +42,11 @@ export default function ManagerDashboardPage() {
   const { data: aiSummary } = useQuery({
     queryKey: ['ai-dashboard-summary'],
     queryFn: () => api.get('/ai/dashboard-summary').then((r) => r.data).catch(() => null),
+  });
+
+  const { data: recentActivities } = useQuery({
+    queryKey: ['recent-activities'],
+    queryFn: () => api.get('/activities/recent?limit=10').then((r) => r.data.activities).catch(() => []),
   });
 
   if (loadingProjects || loadingTeams) {
@@ -240,6 +246,39 @@ export default function ManagerDashboardPage() {
         </Card>
       )}
 
+      {/* Activité récente */}
+      {recentActivities?.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Activity size={15} className="text-primary" />
+              Activité récente
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {recentActivities.map((a) => (
+                <div key={a.id} className="flex items-start gap-3 rounded-lg px-3 py-2 text-sm hover:bg-muted/40">
+                  <Avatar name={a.user?.name || '?'} src={a.user?.avatar} size="xs" className="mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-foreground">
+                      <span className="font-medium">{a.user?.name || 'Système'}</span>{' '}
+                      <span className="text-muted-foreground">{formatAction(a.action, a.properties)}</span>
+                    </p>
+                    {a.project && (
+                      <Link to={`${prefix}/projects/${a.project.id}`} className="text-xs text-primary hover:underline">
+                        {a.project.name}
+                      </Link>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">{a.human_time}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Projets récents */}
       <div>
         <div className="flex items-center justify-between mb-4">
@@ -311,6 +350,21 @@ export default function ManagerDashboardPage() {
       </div>
     </div>
   );
+}
+
+function formatAction(action, props) {
+  const labels = {
+    project_created: 'a créé le projet',
+    task_created: `a créé la tâche « ${props?.task_title || ''} »`,
+    task_updated: `a mis à jour la tâche « ${props?.task_title || ''} »`,
+    task_deleted: `a supprimé la tâche « ${props?.task_title || ''} »`,
+    task_moved: `a déplacé « ${props?.task_title || ''} » → ${props?.new_status || ''}`,
+    member_added: `a ajouté ${props?.member_name || 'un membre'}`,
+    member_removed: `a retiré ${props?.member_name || 'un membre'}`,
+    comment_added: `a commenté « ${props?.task_title || ''} »`,
+    time_entry_added: `a enregistré du temps sur « ${props?.task_title || ''} »`,
+  };
+  return labels[action] || action;
 }
 
 function StatusBadge({ status }) {

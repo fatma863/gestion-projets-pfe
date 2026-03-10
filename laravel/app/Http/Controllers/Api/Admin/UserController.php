@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class UserController extends Controller
@@ -40,13 +41,20 @@ class UserController extends Controller
             'email'    => 'required|email|unique:users,email',
             'password' => 'required|string|min:8',
             'role'     => 'required|string|in:admin,manager,member,viewer',
+            'avatar'   => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
-        $user = User::create([
+        $createData = [
             'name'     => $data['name'],
             'email'    => $data['email'],
             'password' => Hash::make($data['password']),
-        ]);
+        ];
+
+        if ($request->hasFile('avatar')) {
+            $createData['avatar'] = $request->file('avatar')->store('avatars', 'public');
+        }
+
+        $user = User::create($createData);
 
         $user->assignRole($data['role']);
 
@@ -69,12 +77,20 @@ class UserController extends Controller
             'name'  => 'sometimes|required|string|max:255',
             'email' => ['sometimes', 'required', 'email', Rule::unique('users')->ignore($user->id)],
             'password' => 'sometimes|nullable|string|min:8',
+            'avatar'   => 'sometimes|image|mimes:jpg,jpeg,png,webp|max:2048',
         ]);
 
         if (!empty($data['password'])) {
             $data['password'] = Hash::make($data['password']);
         } else {
             unset($data['password']);
+        }
+
+        if ($request->hasFile('avatar')) {
+            if ($user->avatar) {
+                Storage::disk('public')->delete($user->avatar);
+            }
+            $data['avatar'] = $request->file('avatar')->store('avatars', 'public');
         }
 
         $user->update($data);

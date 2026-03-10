@@ -5,6 +5,7 @@ import api from '../../lib/api';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
 import { Card, CardContent } from '../../components/ui/Card';
+import { Avatar } from '../../components/ui/Avatar';
 import { ArrowLeft, Users } from 'lucide-react';
 
 export default function MemberTeamDetailPage() {
@@ -39,7 +40,7 @@ export default function MemberTeamDetailPage() {
           {team.members?.map((m) => (
             <div key={m.id} className="flex items-center justify-between rounded-lg border border-border bg-card p-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">{m.name?.[0] || '?'}</div>
+                <Avatar name={m.name} src={m.avatar} size="md" />
                 <div><p className="font-medium text-foreground">{m.name}</p><p className="text-sm text-muted-foreground">{m.email}</p></div>
               </div>
               <div className="flex items-center gap-3">

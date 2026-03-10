@@ -21,9 +21,15 @@ class ProjectController extends Controller
     public function managers(Request $request): JsonResponse
     {
         $managers = \App\Models\User::role('manager')
-            ->select('id', 'name', 'email')
+            ->select('id', 'name', 'email', 'avatar')
             ->orderBy('name')
-            ->get();
+            ->get()
+            ->map(fn ($u) => [
+                'id' => $u->id,
+                'name' => $u->name,
+                'email' => $u->email,
+                'avatar' => $u->avatar ? asset('storage/' . $u->avatar) : null,
+            ]);
 
         return response()->json(['managers' => $managers]);
     }
@@ -33,7 +39,7 @@ class ProjectController extends Controller
      */
     public function searchUsers(Request $request): JsonResponse
     {
-        $query = \App\Models\User::select('id', 'name', 'email')
+        $query = \App\Models\User::select('id', 'name', 'email', 'avatar')
             ->orderBy('name');
 
         if ($request->search) {
@@ -44,7 +50,14 @@ class ProjectController extends Controller
             });
         }
 
-        return response()->json(['users' => $query->limit(50)->get()]);
+        $users = $query->limit(50)->get()->map(fn ($u) => [
+            'id' => $u->id,
+            'name' => $u->name,
+            'email' => $u->email,
+            'avatar' => $u->avatar ? asset('storage/' . $u->avatar) : null,
+        ]);
+
+        return response()->json(['users' => $users]);
     }
 
     public function index(Request $request): JsonResponse
@@ -130,11 +143,14 @@ class ProjectController extends Controller
         $memberIds = $data['member_ids'] ?? [];
         unset($data['member_ids']);
 
+        // Validate team exists (no membership check — managers can use any team)
         if (!empty($data['team_id'])) {
-            $isMember = $user->hasRole('admin')
-                || $user->teams()->where('teams.id', $data['team_id'])->exists();
-            if (!$isMember) {
-                abort(403, 'Vous n\'êtes pas membre de cette équipe.');
+            $teamExists = \App\Models\Team::where('id', $data['team_id'])->exists();
+            if (!$teamExists) {
+                return response()->json([
+                    'message' => 'L\'équipe sélectionnée n\'existe pas.',
+                    'errors' => ['team_id' => ['L\'équipe sélectionnée n\'existe pas.']],
+                ], 422);
             }
         }
 

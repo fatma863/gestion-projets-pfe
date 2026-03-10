@@ -86,7 +86,7 @@ export default function AdminProjectDetailPage() {
             {project.description && <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>}
             {project.manager && (
               <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-                <UserCheck className="h-4 w-4" /> Manager : <span className="font-medium text-foreground">{project.manager.name}</span>
+                <Avatar name={project.manager.name} src={project.manager.avatar} size="xs" /> Manager : <span className="font-medium text-foreground">{project.manager.name}</span>
               </p>
             )}
           </div>
@@ -202,12 +202,12 @@ function KanbanCard({ task, onClick }) {
         <GripVertical className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity" />
       </div>
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_COLORS[task.priority] || ''}`}>{task.priority}</span>
+        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_COLORS[task.priority] || ''}`}>{{ low: 'Basse', medium: 'Moyenne', high: 'Haute', urgent: 'Urgente' }[task.priority] || task.priority}</span>
         {task.is_overdue && <span className="flex items-center gap-0.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600"><AlertTriangle className="h-2.5 w-2.5" /> Retard</span>}
       </div>
       <div className="flex items-center justify-between">
         {task.assignees?.length > 0 ? (
-          <AvatarGroup max={3}>{task.assignees.map((a) => <Avatar key={a.id} name={a.user?.name || a.name} size="xs" />)}</AvatarGroup>
+          <AvatarGroup max={3}>{task.assignees.map((a) => <Avatar key={a.id} name={a.user?.name || a.name} src={a.user?.avatar || a.avatar} size="xs" />)}</AvatarGroup>
         ) : <div />}
         {task.progress_percent > 0 && (
           <div className="flex items-center gap-1.5 w-20"><ProgressBar value={task.progress_percent} size="sm" /><span className="text-[10px] font-medium text-muted-foreground">{task.progress_percent}%</span></div>
@@ -252,7 +252,7 @@ function MembersTab({ projectId }) {
           <div>
             <label className="mb-1 block text-sm font-medium">Rôle</label>
             <select value={role} onChange={(e) => setRole(e.target.value)} className="flex h-10 rounded-md border border-input bg-white px-3 py-2 text-sm">
-              <option value="manager">Manager</option><option value="developer">Développeur</option><option value="designer">Designer</option><option value="tester">Testeur</option><option value="viewer">Observateur</option>
+              <option value="manager">Gestionnaire</option><option value="developer">Développeur</option><option value="designer">Concepteur</option><option value="tester">Testeur</option><option value="viewer">Observateur</option>
             </select>
           </div>
           <Button size="sm" onClick={() => addMutation.mutate({ user_id: parseInt(userId), project_role: role })} disabled={!userId || addMutation.isPending}>Ajouter</Button>
@@ -262,7 +262,7 @@ function MembersTab({ projectId }) {
         {members?.map((m) => (
           <div key={m.id} className="flex items-center justify-between rounded-xl border border-border bg-white p-3">
             <div className="flex items-center gap-3">
-              <Avatar name={m.name || m.user?.name} size="sm" />
+              <Avatar name={m.name || m.user?.name} src={m.avatar || m.user?.avatar} size="sm" />
               <div>
                 <p className="text-sm font-medium text-foreground">{m.name || m.user?.name}</p>
                 <p className="text-xs text-muted-foreground">{m.email || m.user?.email}</p>
@@ -288,7 +288,7 @@ function ActivityTab({ projectId }) {
     <div className="space-y-2">
       {activities.map((a) => (
         <div key={a.id} className="flex items-start gap-3 rounded-lg border border-border bg-white p-3 text-sm">
-          <Activity className="h-4 w-4 mt-0.5 text-muted-foreground shrink-0" />
+          <Avatar name={a.user?.name || 'S'} src={a.user?.avatar} size="xs" />
           <div><p className="text-foreground"><span className="font-medium">{a.user?.name || 'Système'}</span> — {a.action}</p><p className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleString('fr-FR')}</p></div>
         </div>
       ))}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import api from '../../lib/api';
@@ -12,6 +12,7 @@ import { Select } from '../../components/ui/Select';
 import { Textarea } from '../../components/ui/Textarea';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { MetricCard } from '../../components/ui/MetricCard';
+import { Avatar } from '../../components/ui/Avatar';
 import {
   Plus, Search, FolderKanban, Calendar, Users, MoreVertical,
   Pencil, Trash2, Eye, BarChart3, AlertTriangle,
@@ -30,7 +31,7 @@ function getStatusBadge(status) {
   return opt ? <Badge variant={opt.variant}>{opt.label}</Badge> : <Badge>{status}</Badge>;
 }
 
-const EMPTY_FORM = { name: '', code: '', description: '', team_id: '', status: 'planning', start_date: '', end_date: '', manager_id: '' };
+const EMPTY_FORM = { name: '', code: '', description: '', team_id: '', status: 'planning', start_date: '', end_date: '', manager_id: '', member_ids: [] };
 
 export default function AdminProjectsPage() {
   const queryClient = useQueryClient();
@@ -105,7 +106,7 @@ export default function AdminProjectsPage() {
                   <th className="px-4 py-3 text-left font-medium">Projet</th>
                   <th className="px-4 py-3 text-left font-medium">Code</th>
                   <th className="px-4 py-3 text-left font-medium">Statut</th>
-                  <th className="px-4 py-3 text-left font-medium">Manager</th>
+                  <th className="px-4 py-3 text-left font-medium">Responsable</th>
                   <th className="px-4 py-3 text-left font-medium">Équipe</th>
                   <th className="px-4 py-3 text-left font-medium">Tâches</th>
                   <th className="px-4 py-3 text-left font-medium">Période</th>
@@ -122,7 +123,14 @@ export default function AdminProjectsPage() {
                     </td>
                     <td className="px-4 py-3"><Badge variant="outline" className="font-mono text-xs">{project.code}</Badge></td>
                     <td className="px-4 py-3">{getStatusBadge(project.status)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{project.manager?.name || '-'}</td>
+                    <td className="px-4 py-3">
+                      {project.manager ? (
+                        <div className="flex items-center gap-2">
+                          <Avatar name={project.manager.name} src={project.manager.avatar} size="xs" />
+                          <span className="text-muted-foreground">{project.manager.name}</span>
+                        </div>
+                      ) : <span className="text-muted-foreground">-</span>}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{project.team?.name || '-'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{project.tasks_count || 0}</td>
                     <td className="px-4 py-3 text-muted-foreground text-xs">
@@ -158,6 +166,10 @@ function ProjectFormModal({ open, onClose, project }) {
   const isEdit = !!project;
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  const [memberSearch, setMemberSearch] = useState('');
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  const [selectedMembers, setSelectedMembers] = useState([]);
+  const memberDropdownRef = useRef(null);
 
   const { data: teams } = useQuery({
     queryKey: ['teams-list'],
@@ -169,17 +181,39 @@ function ProjectFormModal({ open, onClose, project }) {
     queryFn: () => api.get('/projects/managers').then((r) => r.data.managers),
   });
 
+  const { data: searchUsers } = useQuery({
+    queryKey: ['search-users-project', memberSearch],
+    queryFn: () => api.get(`/projects/search-users${memberSearch ? `?search=${encodeURIComponent(memberSearch)}` : ''}`).then((r) => r.data.users),
+    enabled: showMemberDropdown,
+  });
+
+  const availableUsers = (searchUsers || []).filter(
+    (u) => !selectedMembers.some((m) => m.id === u.id)
+  );
+
   useEffect(() => {
     if (open) {
       setForm(project ? {
         name: project.name || '', code: project.code || '', description: project.description || '',
         team_id: project.team_id || '', status: project.status || 'planning',
         start_date: project.start_date || '', end_date: project.end_date || '',
-        manager_id: project.manager_id || '',
+        manager_id: project.manager_id || '', member_ids: [],
       } : { ...EMPTY_FORM });
       setErrors({});
+      setSelectedMembers([]);
+      setMemberSearch('');
     }
   }, [open, project]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (memberDropdownRef.current && !memberDropdownRef.current.contains(e.target)) {
+        setShowMemberDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const mutation = useMutation({
     mutationFn: (data) => isEdit ? api.put(`/projects/${project.id}`, data) : api.post('/projects', data),
@@ -189,10 +223,11 @@ function ProjectFormModal({ open, onClose, project }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    const payload = { ...form };
+    const payload = { ...form, member_ids: selectedMembers.map((m) => m.id) };
     if (!payload.team_id) delete payload.team_id;
     if (!payload.start_date) delete payload.start_date;
     if (!payload.end_date) delete payload.end_date;
+    if (payload.member_ids.length === 0) delete payload.member_ids;
     mutation.mutate(payload);
   };
 
@@ -240,6 +275,57 @@ function ProjectFormModal({ open, onClose, project }) {
             </Select>
           </div>
         </div>
+
+        {/* Member selection */}
+        {!isEdit && (
+          <div>
+            <label className="mb-1 block text-sm font-medium">Membres du projet</label>
+            {selectedMembers.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1">
+                {selectedMembers.map((m) => (
+                  <span key={m.id} className="inline-flex items-center gap-1 rounded-full bg-accent px-2 py-0.5 text-xs">
+                    <Avatar name={m.name} src={m.avatar} size="xs" />
+                    {m.name}
+                    <button type="button" onClick={() => setSelectedMembers((prev) => prev.filter((p) => p.id !== m.id))} className="ml-0.5 text-muted-foreground hover:text-foreground">&times;</button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="relative" ref={memberDropdownRef}>
+              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={memberSearch}
+                onChange={(e) => { setMemberSearch(e.target.value); setShowMemberDropdown(true); }}
+                onFocus={() => setShowMemberDropdown(true)}
+                className="pl-8"
+                placeholder="Rechercher des utilisateurs à ajouter..."
+              />
+              {showMemberDropdown && (
+                <div className="absolute z-20 mt-1 max-h-40 w-full overflow-y-auto rounded-md border border-border bg-white shadow-lg">
+                  {availableUsers.length === 0 ? (
+                    <div className="px-3 py-2 text-sm text-muted-foreground">Aucun utilisateur trouvé</div>
+                  ) : (
+                    availableUsers.map((u) => (
+                      <button
+                        key={u.id}
+                        type="button"
+                        onClick={() => { setSelectedMembers((prev) => [...prev, u]); setMemberSearch(''); setShowMemberDropdown(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                      >
+                        <Avatar name={u.name} src={u.avatar} size="xs" />
+                        <div>
+                          <p className="font-medium">{u.name}</p>
+                          <p className="text-xs text-muted-foreground">{u.email}</p>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
             <label className="mb-1 block text-sm font-medium">Date de début</label>

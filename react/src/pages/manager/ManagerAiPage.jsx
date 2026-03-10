@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Select } from '../../components/ui/Select';
 import { Spinner } from '../../components/ui/Spinner';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { Avatar } from '../../components/ui/Avatar';
 import {
   Brain, Clock, AlertTriangle, UserCheck, TrendingUp,
 } from 'lucide-react';
@@ -158,13 +159,13 @@ function TaskRiskPanel() {
           <div className="rounded-lg bg-accent/30 p-4 space-y-3">
             <p className="font-medium">{data.title}</p>
             {data.risk_score != null && <div className="flex items-center gap-2"><span className="text-sm">Score:</span><RiskBadge score={data.risk_score} /></div>}
-            {data.risk_level && <p className="text-sm">Niveau: <span className="font-medium">{data.risk_level}</span></p>}
+            {data.risk_level && <p className="text-sm">Niveau : <span className="font-medium">{{ critical: 'Critique', high: 'Élevé', medium: 'Moyen', low: 'Faible' }[data.risk_level] || data.risk_level}</span></p>}
             {data.risk_factors?.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-semibold">Facteurs de risque</p>
                 {data.risk_factors.map((f, i) => (
                   <div key={i} className="flex items-start gap-2 rounded-lg border border-border bg-white p-3 text-sm">
-                    <Badge variant={f.impact === 'critical' ? 'destructive' : f.impact === 'high' ? 'warning' : 'secondary'} className="mt-0.5 shrink-0">{f.impact}</Badge>
+                    <Badge variant={f.impact === 'critical' ? 'destructive' : f.impact === 'high' ? 'warning' : 'secondary'} className="mt-0.5 shrink-0">{{ critical: 'Critique', high: 'Élevé', medium: 'Moyen', low: 'Faible' }[f.impact] || f.impact}</Badge>
                     <span>{f.detail}</span>
                   </div>
                 ))}
@@ -266,7 +267,7 @@ function SuggestPanel() {
                   <div key={s.user_id} className={`rounded-lg bg-white p-4 border ${i === 0 ? 'border-green-300 ring-1 ring-green-200' : 'border-border'}`}>
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
-                        <div className={`flex h-9 w-9 items-center justify-center rounded-full font-semibold text-sm ${i === 0 ? 'bg-green-100 text-green-700' : 'bg-primary/20 text-primary'}`}>{s.name?.[0] || '?'}</div>
+                        <Avatar name={s.name} src={s.avatar} size="sm" className={i === 0 ? 'ring-green-200' : ''} />
                         <div><p className="font-medium text-sm">{s.name}</p><p className="text-xs text-muted-foreground">{s.email}</p></div>
                       </div>
                       <div className="flex items-center gap-2"><Badge variant={i === 0 ? 'success' : 'secondary'}>Score: {s.total}</Badge>{i === 0 && <Badge variant="success">Recommandé</Badge>}</div>

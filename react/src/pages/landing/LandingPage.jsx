@@ -8,7 +8,7 @@ import {
 const features = [
   {
     icon: FolderKanban,
-    title: 'Kanban Board',
+    title: 'Tableau Kanban',
     description: 'Organisez vos tâches avec un tableau Kanban intuitif. Glissez-déposez pour changer le statut.',
     color: 'bg-blue-100 text-blue-600',
   },
@@ -32,7 +32,7 @@ const features = [
   },
   {
     icon: BarChart3,
-    title: 'Analytics & Rapports',
+    title: 'Analytique & Rapports',
     description: 'Tableaux de bord pour suivre la progression, les risques et la productivité.',
     color: 'bg-rose-100 text-rose-600',
   },
@@ -48,7 +48,7 @@ const stats = [
   { value: 'Kanban', label: 'Gestion visuelle' },
   { value: 'Gantt', label: 'Planification temporelle' },
   { value: 'IA', label: 'Estimations intelligentes' },
-  { value: '100%', label: 'Open Source' },
+  { value: '100%', label: 'Code ouvert' },
 ];
 
 export default function LandingPage() {

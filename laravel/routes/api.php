@@ -12,6 +12,9 @@ use App\Http\Controllers\Api\TaskStatusController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\Api\ActivityLogController;
 use App\Http\Controllers\Api\WorkloadController;
+use App\Http\Controllers\Api\SprintController;
+use App\Http\Controllers\Api\StandupController;
+use App\Http\Controllers\Api\ScrumGeneratorController;
 use Illuminate\Support\Facades\Route;
 
 // ─── Routes publiques ───────────────────────────────────
@@ -29,6 +32,9 @@ Route::post('/auth/login', [AuthController::class, 'login']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/me', [AuthController::class, 'me']);
+    Route::post('/me/profile', [AuthController::class, 'updateProfile']);
+    Route::delete('/me/avatar', [AuthController::class, 'deleteAvatar']);
+    Route::post('/me/password', [AuthController::class, 'changePassword']);
 
     // Notifications
     Route::get('notifications', [NotificationController::class, 'index']);
@@ -51,6 +57,8 @@ Route::middleware(['auth:sanctum', 'role:admin|manager'])->group(function () {
     Route::delete('teams/{team}', [TeamController::class, 'destroy']);
     Route::post('teams/{team}/members', [TeamController::class, 'addMember']);
     Route::delete('teams/{team}/members/{user}', [TeamController::class, 'removeMember']);
+    Route::post('teams/{team}/projects', [TeamController::class, 'assignProject']);
+    Route::delete('teams/{team}/projects/{project}', [TeamController::class, 'removeProject']);
 
     // Projets — création, modification, suppression
     Route::get('projects/managers', [ProjectController::class, 'managers']);
@@ -85,6 +93,18 @@ Route::middleware(['auth:sanctum', 'role:admin|manager'])->group(function () {
 
     // Workload (manager+ only)
     Route::get('projects/{project}/workload', [WorkloadController::class, 'project']);
+
+    // Sprints — CRUD (manager+)
+    Route::post('projects/{project}/sprints', [SprintController::class, 'store']);
+    Route::put('sprints/{sprint}', [SprintController::class, 'update']);
+    Route::delete('sprints/{sprint}', [SprintController::class, 'destroy']);
+    Route::post('sprints/{sprint}/tasks', [SprintController::class, 'addTasks']);
+    Route::delete('sprints/{sprint}/tasks/{task}', [SprintController::class, 'removeTask']);
+
+    // Scrum AI Generator (manager+)
+    Route::post('projects/{project}/scrum/generate', [ScrumGeneratorController::class, 'generate']);
+    Route::put('backlog-items/{backlogItem}', [ScrumGeneratorController::class, 'updateBacklogItem']);
+    Route::delete('backlog-items/{backlogItem}', [ScrumGeneratorController::class, 'deleteBacklogItem']);
 });
 
 // ─── Routes Admin uniquement — IA optimisation ──────────
@@ -107,6 +127,22 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('projects/{project}/dashboard', [ProjectController::class, 'dashboard']);
     Route::get('projects/{project}/members', [ProjectController::class, 'members']);
     Route::get('projects/{project}/statuses', [TaskStatusController::class, 'index']);
+
+    // Sprints — lecture (protégé par Policy)
+    Route::get('projects/{project}/sprints', [SprintController::class, 'index']);
+    Route::get('sprints/{sprint}', [SprintController::class, 'show']);
+    Route::get('projects/{project}/backlog', [SprintController::class, 'backlog']);
+    Route::get('sprints/{sprint}/burndown', [SprintController::class, 'burndown']);
+
+    // Scrum — lecture backlog items + analytics
+    Route::get('projects/{project}/backlog-items', [ScrumGeneratorController::class, 'backlogItems']);
+    Route::get('sprints/{sprint}/analytics', [ScrumGeneratorController::class, 'sprintAnalytics']);
+    Route::get('sprints/{sprint}/ai-suggestions', [ScrumGeneratorController::class, 'sprintSuggestions']);
+
+    // Standups
+    Route::get('sprints/{sprint}/standups', [StandupController::class, 'index']);
+    Route::post('sprints/{sprint}/standups', [StandupController::class, 'store']);
+    Route::get('sprints/{sprint}/standups/my-status', [StandupController::class, 'myStatus']);
 
     // Tâches — CRUD (protegé par Policy)
     Route::get('projects/{project}/tasks', [TaskController::class, 'index']);
@@ -133,6 +169,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('projects/{project}/gantt', [GanttController::class, 'show']);
 
     // Activity log
+    Route::get('activities/recent', [ActivityLogController::class, 'recent']);
     Route::get('projects/{project}/activities', [ActivityLogController::class, 'index']);
 
     // IA basique (member+, avec permission)

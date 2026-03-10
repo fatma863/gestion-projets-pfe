@@ -12,6 +12,8 @@ import {
   ListTodo,
   Sparkles,
   Briefcase,
+  Layers,
+  MessageSquare,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -29,6 +31,15 @@ const sections = [
       { to: '/manager/projects', icon: FolderKanban, label: 'Projets', match: '/manager/projects' },
       { to: '/manager/teams', icon: Users, label: 'Équipes', match: '/manager/teams' },
       { to: '/manager/gantt', icon: CalendarRange, label: 'Gantt', match: '/manager/gantt' },
+    ],
+  },
+  {
+    label: 'Scrum',
+    items: [
+      { to: '/manager/sprints', icon: Layers, label: 'Sprints', match: '/manager/sprints' },
+      { to: '/manager/backlog', icon: ListTodo, label: 'Backlog', match: '/manager/backlog' },
+      { to: '/manager/scrum-board', icon: CalendarRange, label: 'Scrum Board', match: '/manager/scrum-board' },
+      { to: '/manager/scrum-generator', icon: Sparkles, label: 'IA Scrum', match: '/manager/scrum-generator' },
     ],
   },
   {

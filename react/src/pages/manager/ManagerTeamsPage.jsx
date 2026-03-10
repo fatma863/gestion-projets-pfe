@@ -10,6 +10,7 @@ import { Textarea } from '../../components/ui/Textarea';
 import { Spinner } from '../../components/ui/Spinner';
 import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { AvatarGroup } from '../../components/ui/Avatar';
 import {
   Plus, Search, Users, MoreVertical, Pencil, Trash2, Eye,
 } from 'lucide-react';
@@ -84,6 +85,11 @@ export default function ManagerTeamsPage() {
                     <span className="flex items-center gap-1"><Users className="h-3.5 w-3.5" /> {team.members_count || 0} membres</span>
                     <span>{team.projects_count || 0} projets</span>
                   </div>
+                  {team.members?.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-border">
+                      <AvatarGroup users={team.members} max={5} size="sm" />
+                    </div>
+                  )}
                 </Link>
               </CardContent>
             </Card>

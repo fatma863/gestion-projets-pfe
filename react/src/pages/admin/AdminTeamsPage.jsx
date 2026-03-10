@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import api from '../../lib/api';
 import { Card, CardContent } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -10,8 +11,9 @@ import { Spinner } from '../../components/ui/Spinner';
 import { Modal } from '../../components/ui/Modal';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { MetricCard } from '../../components/ui/MetricCard';
+import { Avatar, AvatarGroup } from '../../components/ui/Avatar';
 import {
-  Plus, Search, Users, Pencil, Trash2, UsersRound,
+  Plus, Search, Users, Pencil, Trash2, UsersRound, Eye,
 } from 'lucide-react';
 
 export default function AdminTeamsPage() {
@@ -81,13 +83,19 @@ export default function AdminTeamsPage() {
                 {teams.map((team) => (
                   <tr key={team.id} className="border-b border-border last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-3">
-                      <span className="font-medium text-foreground">{team.name}</span>
+                      <Link to={`/admin/teams/${team.id}`} className="font-medium text-foreground hover:text-primary">{team.name}</Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground max-w-xs truncate">{team.description || '-'}</td>
-                    <td className="px-4 py-3"><Badge variant="secondary">{team.members_count || 0}</Badge></td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        {team.members?.length > 0 && <AvatarGroup users={team.members} max={3} size="xs" />}
+                        <Badge variant="secondary">{team.members_count || 0}</Badge>
+                      </div>
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{team.projects_count || 0}</td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <Link to={`/admin/teams/${team.id}`} className="rounded p-1 hover:bg-accent" title="Voir"><Eye size={16} className="text-muted-foreground" /></Link>
                         <button onClick={() => { setEditingTeam(team); setShowForm(true); }} className="rounded p-1 hover:bg-accent"><Pencil size={16} className="text-muted-foreground" /></button>
                         <button onClick={() => { if (window.confirm('Supprimer cette équipe ?')) deleteMutation.mutate(team.id); }} className="rounded p-1 hover:bg-destructive/10"><Trash2 size={16} className="text-destructive" /></button>
                       </div>

@@ -65,6 +65,16 @@ class Project extends Model
         return $this->hasMany(TaskStatus::class)->orderBy('order');
     }
 
+    public function sprints(): HasMany
+    {
+        return $this->hasMany(Sprint::class);
+    }
+
+    public function backlogItems(): HasMany
+    {
+        return $this->hasMany(BacklogItem::class);
+    }
+
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);

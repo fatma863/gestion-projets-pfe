@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Link } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSpacePrefix } from '../../hooks/useSpacePrefix';
 import api from '../../lib/api';
 import { Card, CardContent } from '../../components/ui/Card';
@@ -10,6 +9,8 @@ import { MetricCard } from '../../components/ui/MetricCard';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { EmptyState } from '../../components/ui/EmptyState';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { Avatar } from '../../components/ui/Avatar';
+import TaskModal from '../projects/TaskModal';
 import { motion } from 'framer-motion';
 import {
   ListTodo, Search, AlertTriangle, Clock, Calendar,
@@ -27,14 +28,24 @@ const STATUS_DONE = ['terminé', 'done'];
 
 export default function MyTasksPage() {
   const prefix = useSpacePrefix();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
-  const [filterStatus, setFilterStatus] = useState(''); // all | overdue | in-progress | done
-  const [sortBy, setSortBy] = useState('due_date'); // due_date | priority | updated
+  const [filterStatus, setFilterStatus] = useState('');
+  const [sortBy, setSortBy] = useState('due_date');
+  const [taskModal, setTaskModal] = useState({ open: false, task: null });
 
   const { data: tasks, isLoading } = useQuery({
     queryKey: ['my-tasks'],
     queryFn: () => api.get('/tasks').then((r) => r.data.tasks),
+  });
+
+  // Fetch statuses for the selected task's project
+  const selectedProjectId = taskModal.task?.project_id || taskModal.task?.project?.id;
+  const { data: statuses } = useQuery({
+    queryKey: ['statuses', selectedProjectId],
+    queryFn: () => api.get(`/projects/${selectedProjectId}/statuses`).then((r) => r.data.statuses),
+    enabled: !!selectedProjectId && taskModal.open,
   });
 
   const filtered = useMemo(() => {
@@ -164,15 +175,26 @@ export default function MyTasksPage() {
       ) : (
         <div className="space-y-1.5">
           {filtered.map((task, i) => (
-            <TaskRow key={task.id} task={task} prefix={prefix} index={i} />
+            <TaskRow key={task.id} task={task} prefix={prefix} index={i} onClick={() => setTaskModal({ open: true, task })} />
           ))}
         </div>
+      )}
+
+      {taskModal.open && selectedProjectId && (
+        <TaskModal
+          open={taskModal.open}
+          onClose={() => { setTaskModal({ open: false, task: null }); queryClient.invalidateQueries({ queryKey: ['my-tasks'] }); }}
+          projectId={selectedProjectId}
+          task={taskModal.task}
+          defaultStatusId={taskModal.task?.status_id}
+          statuses={statuses || []}
+        />
       )}
     </div>
   );
 }
 
-function TaskRow({ task, prefix, index }) {
+function TaskRow({ task, prefix, index, onClick }) {
   const isDone = STATUS_DONE.includes(task.status?.name?.toLowerCase());
   const isOverdue = !isDone && task.due_date && new Date(task.due_date) < new Date();
   const priorityInfo = PRIORITY_MAP[task.priority] || { label: task.priority, variant: 'outline' };
@@ -183,8 +205,7 @@ function TaskRow({ task, prefix, index }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2, delay: Math.min(index * 0.02, 0.3) }}
     >
-      <Link to={`${prefix}/projects/${task.project_id || task.project?.id}`}>
-        <div className={`flex items-center justify-between rounded-xl border bg-white p-3.5 transition-all duration-200 hover:shadow-sm hover:border-border/80 ${isOverdue ? 'border-red-200/70' : 'border-border/50'}`}>
+      <div onClick={onClick} className={`flex items-center justify-between rounded-xl border bg-white p-3.5 transition-all duration-200 hover:shadow-sm hover:border-border/80 cursor-pointer ${isOverdue ? 'border-red-200/70' : 'border-border/50'}`}>
           <div className="flex items-center gap-3 min-w-0 flex-1">
             {isDone ? (
               <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50">
@@ -224,6 +245,12 @@ function TaskRow({ task, prefix, index }) {
                 {new Date(task.due_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}
               </span>
             )}
+            {task.assignees?.length > 0 && (
+              <div className="flex items-center gap-1">
+                <Avatar name={task.assignees[0]?.user?.name || task.assignees[0]?.name || ''} src={task.assignees[0]?.user?.avatar || task.assignees[0]?.avatar} size="xs" />
+                <span className="text-[11px] text-muted-foreground truncate max-w-[80px]">{task.assignees[0]?.user?.name || task.assignees[0]?.name}</span>
+              </div>
+            )}
             {task.progress_percent > 0 && (
               <div className="flex items-center gap-1.5 w-16">
                 <ProgressBar value={task.progress_percent} size="sm" />
@@ -232,7 +259,6 @@ function TaskRow({ task, prefix, index }) {
             )}
           </div>
         </div>
-      </Link>
     </motion.div>
   );
 }

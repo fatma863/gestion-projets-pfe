@@ -204,7 +204,7 @@ export default function AdminDashboardPage() {
             <div className="space-y-3">
               {(stats?.recent_users || []).map((u) => (
                 <div key={u.id} className="flex items-center gap-3 text-sm">
-                  <Avatar name={u.name} size="sm" />
+                  <Avatar name={u.name} src={u.avatar} size="sm" />
                   <div className="flex-1 min-w-0">
                     <span className="font-medium text-foreground block truncate">{u.name}</span>
                     <span className="text-xs text-muted-foreground">{u.email}</span>

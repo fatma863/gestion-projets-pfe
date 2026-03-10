@@ -19,6 +19,7 @@ import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminProjectsPage from './pages/admin/AdminProjectsPage';
 import AdminProjectDetailPage from './pages/admin/AdminProjectDetailPage';
 import AdminTeamsPage from './pages/admin/AdminTeamsPage';
+import AdminTeamDetailPage from './pages/admin/AdminTeamDetailPage';
 import AdminAiPage from './pages/admin/AdminAiPage';
 
 // Manager pages
@@ -31,6 +32,12 @@ import ManagerAiPage from './pages/manager/ManagerAiPage';
 import ManagerGanttPage from './pages/manager/ManagerGanttPage';
 import ManagerNotificationsPage from './pages/manager/ManagerNotificationsPage';
 import ManagerSettingsPage from './pages/manager/ManagerSettingsPage';
+import ManagerSprintListPage from './pages/manager/ManagerSprintListPage';
+import ManagerSprintDetailPage from './pages/manager/ManagerSprintDetailPage';
+import ManagerBacklogPage from './pages/manager/ManagerBacklogPage';
+import ManagerStandupDashboard from './pages/manager/ManagerStandupDashboard';
+import ManagerScrumGeneratorPage from './pages/manager/ManagerScrumGeneratorPage';
+import ManagerScrumBoardPage from './pages/manager/ManagerScrumBoardPage';
 
 // Member (app) pages
 import MemberDashboardPage from './pages/app/MemberDashboardPage';
@@ -42,6 +49,12 @@ import MemberAiPage from './pages/app/MemberAiPage';
 import MemberGanttPage from './pages/app/MemberGanttPage';
 import MemberNotificationsPage from './pages/app/MemberNotificationsPage';
 import MemberSettingsPage from './pages/app/MemberSettingsPage';
+import MemberSprintListPage from './pages/app/MemberSprintListPage';
+import MemberSprintDetailPage from './pages/app/MemberSprintDetailPage';
+import MemberStandupPage from './pages/app/MemberStandupPage';
+import MemberBacklogPage from './pages/app/MemberBacklogPage';
+import MemberToolsPage from './pages/app/MemberToolsPage';
+import MemberScrumBoardPage from './pages/app/MemberScrumBoardPage';
 
 // Viewer (app) pages
 import ViewerDashboardPage from './pages/app/ViewerDashboardPage';
@@ -100,6 +113,7 @@ function App() {
               <Route path="/admin/projects" element={<AdminProjectsPage />} />
               <Route path="/admin/projects/:id" element={<AdminProjectDetailPage />} />
               <Route path="/admin/teams" element={<AdminTeamsPage />} />
+              <Route path="/admin/teams/:id" element={<AdminTeamDetailPage />} />
               <Route path="/admin/ai" element={<AdminAiPage />} />
               <Route path="/admin/gantt" element={<GanttPage />} />
               <Route path="/admin/notifications" element={<NotificationsPage />} />
@@ -117,6 +131,12 @@ function App() {
               <Route path="/manager/ai" element={<ManagerAiPage />} />
               <Route path="/manager/gantt" element={<ManagerGanttPage />} />
               <Route path="/manager/notifications" element={<ManagerNotificationsPage />} />
+              <Route path="/manager/sprints" element={<ManagerSprintListPage />} />
+              <Route path="/manager/sprints/:id" element={<ManagerSprintDetailPage />} />
+              <Route path="/manager/backlog" element={<ManagerBacklogPage />} />
+              <Route path="/manager/standups/:sprintId" element={<ManagerStandupDashboard />} />
+              <Route path="/manager/scrum-generator" element={<ManagerScrumGeneratorPage />} />
+              <Route path="/manager/scrum-board" element={<ManagerScrumBoardPage />} />
               <Route path="/manager/settings" element={<ManagerSettingsPage />} />
             </Route>
 
@@ -131,6 +151,12 @@ function App() {
               <Route path="/app/ai" element={<MemberAiPage />} />
               <Route path="/app/gantt" element={<AppPage memberPage={<MemberGanttPage />} viewerPage={<MemberGanttPage />} />} />
               <Route path="/app/notifications" element={<AppPage memberPage={<MemberNotificationsPage />} viewerPage={<MemberNotificationsPage />} />} />
+              <Route path="/app/sprints" element={<MemberSprintListPage />} />
+              <Route path="/app/sprints/:id" element={<MemberSprintDetailPage />} />
+              <Route path="/app/backlog" element={<MemberBacklogPage />} />
+              <Route path="/app/standups/:sprintId" element={<MemberStandupPage />} />
+              <Route path="/app/scrum-board" element={<MemberScrumBoardPage />} />
+              <Route path="/app/tools" element={<MemberToolsPage />} />
               <Route path="/app/settings" element={<AppPage memberPage={<MemberSettingsPage />} viewerPage={<MemberSettingsPage />} />} />
             </Route>
 

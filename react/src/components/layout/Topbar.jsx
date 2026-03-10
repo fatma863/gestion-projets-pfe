@@ -36,7 +36,7 @@ export default function Topbar({ onMenuClick }) {
   };
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-white/80 backdrop-blur-sm px-4 sm:px-6">
+    <header className="relative z-50 flex h-14 items-center justify-between border-b border-border bg-white/80 backdrop-blur-sm px-4 sm:px-6">
       <div className="flex items-center gap-3">
         <button
           onClick={onMenuClick}
@@ -67,7 +67,7 @@ export default function Topbar({ onMenuClick }) {
           </button>
 
           {dropdownOpen && (
-            <div className="absolute right-0 top-full mt-1.5 w-80 rounded-xl border border-border bg-white shadow-xl z-50 overflow-hidden">
+            <div className="absolute right-0 top-full mt-1.5 w-96 rounded-xl border border-border bg-white shadow-xl z-50 overflow-hidden">
               <div className="flex items-center justify-between px-4 py-3 bg-muted/30">
                 <span className="text-sm font-semibold text-foreground">Notifications</span>
                 <button
@@ -79,7 +79,7 @@ export default function Topbar({ onMenuClick }) {
                 </button>
               </div>
 
-              <div className="max-h-72 overflow-y-auto custom-scrollbar">
+              <div className="max-h-80 overflow-y-auto custom-scrollbar">
                 {recentNotifications.length === 0 ? (
                   <p className="px-4 py-8 text-center text-sm text-muted-foreground">Aucune notification</p>
                 ) : (
@@ -92,22 +92,23 @@ export default function Topbar({ onMenuClick }) {
                     >
                       <div className={`mt-1.5 h-2 w-2 flex-shrink-0 rounded-full ${notif.read_at ? 'bg-transparent' : 'bg-primary'}`} />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">{notif.title || notif.type}</p>
-                        <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">{notif.message}</p>
+                        <p className="text-sm font-medium text-foreground">{notif.title || notif.type}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{notif.message}</p>
                         <p className="mt-1 text-[11px] text-muted-foreground/60">
                           {new Date(notif.created_at).toLocaleDateString('fr-FR', {
                             day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
                           })}
                         </p>
                       </div>
-                      <button
-                        onClick={() => markRead.mutate(notif.id)}
-                        disabled={!!notif.read_at}
-                        className={`mt-1 p-1 rounded-md transition-colors ${notif.read_at ? 'opacity-40 cursor-not-allowed' : 'hover:bg-accent'}`}
-                        title={notif.read_at ? 'Déjà lu' : 'Marquer comme lu'}
-                      >
-                        <Check size={14} className="text-muted-foreground" />
-                      </button>
+                      {!notif.read_at && (
+                        <button
+                          onClick={() => markRead.mutate(notif.id)}
+                          className="mt-1 p-1 rounded-md transition-colors hover:bg-accent flex-shrink-0"
+                          title="Marquer comme lu"
+                        >
+                          <Check size={14} className="text-muted-foreground" />
+                        </button>
+                      )}
                     </div>
                   ))
                 )}
@@ -129,7 +130,7 @@ export default function Topbar({ onMenuClick }) {
 
         {/* User */}
         <div className="flex items-center gap-2.5">
-          <Avatar name={user?.name} size="sm" />
+          <Avatar name={user?.name} src={user?.avatar} size="sm" />
           <div className="hidden sm:block">
             <p className="text-sm font-medium text-foreground leading-none">{user?.name}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{user?.email}</p>

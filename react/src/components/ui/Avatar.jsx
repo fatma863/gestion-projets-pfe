@@ -18,7 +18,7 @@ function pickColor(name) {
   return COLORS[Math.abs(hash) % COLORS.length];
 }
 
-export function Avatar({ name, src, size = 'md', className }) {
+export function Avatar({ name, src, size = 'md', className, showTooltip = true }) {
   const sizes = {
     xs: 'h-6 w-6 text-[10px]',
     sm: 'h-7 w-7 text-xs',
@@ -27,11 +27,14 @@ export function Avatar({ name, src, size = 'md', className }) {
     xl: 'h-12 w-12 text-lg',
   };
 
+  const tooltipTitle = showTooltip ? name : undefined;
+
   if (src) {
     return (
       <img
         src={src}
         alt={name || ''}
+        title={tooltipTitle}
         className={cn('rounded-full object-cover ring-2 ring-white', sizes[size], className)}
       />
     );
@@ -47,7 +50,7 @@ export function Avatar({ name, src, size = 'md', className }) {
         pickColor(name),
         className
       )}
-      title={name}
+      title={tooltipTitle}
     >
       {initial}
     </div>
@@ -61,7 +64,7 @@ export function AvatarGroup({ users = [], max = 4, size = 'sm' }) {
   return (
     <div className="flex -space-x-2">
       {visible.map((u, i) => (
-        <Avatar key={u.id || i} name={u.name || u.user?.name} size={size} />
+        <Avatar key={u.id || i} name={u.name || u.user?.name} src={u.avatar || u.user?.avatar} size={size} />
       ))}
       {remaining > 0 && (
         <div

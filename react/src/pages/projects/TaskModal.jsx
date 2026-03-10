@@ -12,6 +12,7 @@ import { Textarea } from '../../components/ui/Textarea';
 import { Select } from '../../components/ui/Select';
 import { Badge } from '../../components/ui/Badge';
 import { Spinner } from '../../components/ui/Spinner';
+import { Avatar } from '../../components/ui/Avatar';
 import {
   MessageSquare, Clock, Paperclip, Users, Trash2, Send, Plus,
 } from 'lucide-react';
@@ -207,7 +208,7 @@ export default function TaskModal({ open, onClose, projectId, task, defaultStatu
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <div>
-              <label className="mb-1 block text-sm font-medium">Story Points</label>
+              <label className="mb-1 block text-sm font-medium">Points de complexité</label>
               <Input type="number" min={0} {...register('story_points')} />
             </div>
             <div>
@@ -299,6 +300,7 @@ function CommentsTab({ taskId }) {
         {comments?.map((c) => (
           <div key={c.id} className="rounded-lg bg-accent/30 p-3">
             <div className="mb-1 flex items-center justify-between">
+              <Avatar name={c.user?.name} src={c.user?.avatar} size="xs" />
               <span className="text-sm font-medium text-foreground">{c.user?.name}</span>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">
@@ -462,9 +464,7 @@ function AssigneesTab({ taskId }) {
         {assignees?.map((a) => (
           <div key={a.id} className="flex items-center justify-between rounded-lg bg-accent/30 p-3">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
-                {(a.user?.name || '?')[0]}
-              </div>
+              <Avatar name={a.user?.name} src={a.user?.avatar || a.avatar} size="sm" />
               <div>
                 <p className="text-sm font-medium">{a.user?.name}</p>
                 <p className="text-xs text-muted-foreground">{a.allocation_percent}% allocation</p>

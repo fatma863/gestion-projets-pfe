@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Select } from '../../components/ui/Select';
 import { Spinner } from '../../components/ui/Spinner';
 import { PageHeader } from '../../components/ui/PageHeader';
+import { Avatar } from '../../components/ui/Avatar';
 import {
   Brain, Clock, AlertTriangle, UserCheck, TrendingUp, Zap,
 } from 'lucide-react';
@@ -196,7 +197,7 @@ function TaskResult({ data }) {
             {data.comparable_range?.min != null && <Row label="Plage (min)" value={`${data.comparable_range.min} h`} />}
             {data.comparable_range?.max != null && <Row label="Plage (max)" value={`${data.comparable_range.max} h`} />}
             {data.risk_score != null && <tr className="hover:bg-muted/20"><td className="px-4 py-2 text-muted-foreground">Score de risque</td><td className="px-4 py-2"><RiskBadge score={data.risk_score} /></td></tr>}
-            {data.risk_level && <Row label="Niveau" value={data.risk_level} />}
+            {data.risk_level && <Row label="Niveau" value={{ critical: 'Critique', high: 'Élevé', medium: 'Moyen', low: 'Faible' }[data.risk_level] || data.risk_level} />}
           </tbody>
         </table>
       </div>
@@ -205,7 +206,7 @@ function TaskResult({ data }) {
           <h4 className="text-sm font-semibold">Facteurs de risque</h4>
           {data.risk_factors.map((f, i) => (
             <div key={i} className="flex items-start gap-2 rounded-lg border border-border bg-white p-3 text-sm">
-              <Badge variant={f.impact === 'critical' ? 'destructive' : f.impact === 'high' ? 'warning' : 'secondary'} className="mt-0.5 shrink-0">{f.impact}</Badge>
+              <Badge variant={f.impact === 'critical' ? 'destructive' : f.impact === 'high' ? 'warning' : 'secondary'} className="mt-0.5 shrink-0">{{ critical: 'Critique', high: 'Élevé', medium: 'Moyen', low: 'Faible' }[f.impact] || f.impact}</Badge>
               <span>{f.detail}</span>
             </div>
           ))}
@@ -221,6 +222,7 @@ function TaskResult({ data }) {
         <div className="rounded-lg border border-border bg-green-50 p-4">
           <h4 className="mb-2 text-sm font-semibold text-green-800">Meilleur candidat</h4>
           <div className="flex items-center gap-3">
+            <Avatar name={data.best_match.name} src={data.best_match.avatar} size="sm" />
             <span className="font-medium text-green-900">{data.best_match.name}</span>
             {data.best_match.total != null && <Badge variant="outline">Score: {data.best_match.total}</Badge>}
             {data.confidence != null && <Badge variant="secondary">Confiance: {Math.round(data.confidence * 100)}%</Badge>}
@@ -303,7 +305,12 @@ function OptimizeResult({ data }) {
                   <td className="px-4 py-2 font-medium">{s.title}</td>
                   <td className="px-4 py-2"><PriorityBadge priority={s.priority} /></td>
                   <td className="px-4 py-2">{s.complexity ?? '—'}/10</td>
-                  <td className="px-4 py-2 font-medium">{s.best_match?.name || '—'}</td>
+                  <td className="px-4 py-2 font-medium">
+                    <div className="flex items-center gap-2">
+                      {s.best_match?.name ? <Avatar name={s.best_match.name} src={s.best_match.avatar} size="xs" /> : null}
+                      {s.best_match?.name || '—'}
+                    </div>
+                  </td>
                   <td className="px-4 py-2">{s.best_match?.total != null ? s.best_match.total : '—'}</td>
                   <td className="px-4 py-2">{s.confidence != null ? `${Math.round(s.confidence * 100)}%` : '—'}</td>
                 </tr>

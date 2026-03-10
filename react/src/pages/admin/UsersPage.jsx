@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardHeader, CardTitle, CardContent } from '../../components/ui/Card';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { Select } from '../../components/ui/Select';
 import { Spinner } from '../../components/ui/Spinner';
-import { Users, Plus, Pencil, Trash2, Shield, X } from 'lucide-react';
+import { Avatar } from '../../components/ui/Avatar';
+import { Users, Plus, Pencil, Trash2, Shield, X, Camera, Loader2 } from 'lucide-react';
 
 export default function UsersPage() {
   const queryClient = useQueryClient();
+  const { user: currentUser, fetchUser } = useAuth();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showModal, setShowModal] = useState(false);
@@ -60,7 +63,7 @@ export default function UsersPage() {
           <option value="admin">Admin</option>
           <option value="manager">Manager</option>
           <option value="member">Membre</option>
-          <option value="viewer">Viewer</option>
+          <option value="viewer">Observateur</option>
         </Select>
       </div>
 
@@ -83,7 +86,12 @@ export default function UsersPage() {
                   const roleName = (u.roles || []).map((r) => (typeof r === 'string' ? r : r.name)).join(', ') || 'Aucun';
                   return (
                     <tr key={u.id} className="border-b border-border last:border-0 hover:bg-muted/30">
-                      <td className="px-4 py-3 font-medium">{u.name}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar name={u.name} src={u.avatar} size="md" />
+                          <span className="font-medium">{u.name}</span>
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">{u.email}</td>
                       <td className="px-4 py-3">
                         <Select
@@ -94,7 +102,7 @@ export default function UsersPage() {
                           <option value="admin">Admin</option>
                           <option value="manager">Manager</option>
                           <option value="member">Membre</option>
-                          <option value="viewer">Viewer</option>
+                          <option value="viewer">Observateur</option>
                         </Select>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -136,6 +144,8 @@ export default function UsersPage() {
       {showModal && (
         <UserModal
           user={editUser}
+          currentUserId={currentUser?.id}
+          fetchCurrentUser={fetchUser}
           onClose={() => setShowModal(false)}
           onSuccess={() => {
             setShowModal(false);
@@ -147,15 +157,27 @@ export default function UsersPage() {
   );
 }
 
-function UserModal({ user, onClose, onSuccess }) {
+function UserModal({ user, currentUserId, fetchCurrentUser, onClose, onSuccess }) {
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState(
     user ? ((user.roles || []).map((r) => (typeof r === 'string' ? r : r.name))[0] || 'member') : 'member'
   );
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreview, setAvatarPreview] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const avatarInputRef = useState(null);
+
+  const handleAvatarChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return;
+    if (file.size > 2 * 1024 * 1024) return;
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file));
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -163,11 +185,37 @@ function UserModal({ user, onClose, onSuccess }) {
     setLoading(true);
     try {
       if (user) {
-        const payload = { name, email };
-        if (password) payload.password = password;
-        await api.put(`/admin/users/${user.id}`, payload);
+        if (avatarFile) {
+          const formData = new FormData();
+          formData.append('name', name);
+          formData.append('email', email);
+          if (password) formData.append('password', password);
+          formData.append('avatar', avatarFile);
+          await api.post(`/admin/users/${user.id}?_method=PUT`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } else {
+          const payload = { name, email };
+          if (password) payload.password = password;
+          await api.put(`/admin/users/${user.id}`, payload);
+        }
+        if (user.id === currentUserId) {
+          await fetchCurrentUser();
+        }
       } else {
-        await api.post('/admin/users', { name, email, password, role });
+        if (avatarFile) {
+          const formData = new FormData();
+          formData.append('name', name);
+          formData.append('email', email);
+          formData.append('password', password);
+          formData.append('role', role);
+          formData.append('avatar', avatarFile);
+          await api.post('/admin/users', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+        } else {
+          await api.post('/admin/users', { name, email, password, role });
+        }
       }
       onSuccess();
     } catch (err) {
@@ -186,6 +234,25 @@ function UserModal({ user, onClose, onSuccess }) {
         </div>
         {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Avatar upload */}
+          <div className="flex items-center gap-4">
+            <div className="relative group">
+              {(avatarPreview || user?.avatar) ? (
+                <img
+                  src={avatarPreview || user.avatar}
+                  alt={name}
+                  className="h-16 w-16 rounded-full object-cover ring-2 ring-primary/20"
+                />
+              ) : (
+                <Avatar name={name || '?'} size="xl" className="ring-2 ring-primary/20" />
+              )}
+              <label className="absolute inset-0 flex cursor-pointer items-center justify-center rounded-full bg-black/40 opacity-0 transition-opacity group-hover:opacity-100">
+                <Camera className="h-4 w-4 text-white" />
+                <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleAvatarChange} />
+              </label>
+            </div>
+            <p className="text-xs text-muted-foreground">JPG, PNG ou WebP. Max 2 Mo.</p>
+          </div>
           <div>
             <label className="mb-1 block text-sm font-medium">Nom</label>
             <Input value={name} onChange={(e) => setName(e.target.value)} required />
@@ -207,7 +274,7 @@ function UserModal({ user, onClose, onSuccess }) {
                 <option value="admin">Admin</option>
                 <option value="manager">Manager</option>
                 <option value="member">Membre</option>
-                <option value="viewer">Viewer</option>
+                <option value="viewer">Observateur</option>
               </Select>
             </div>
           )}

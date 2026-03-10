@@ -14,7 +14,7 @@ class TeamPolicy
 
     public function view(User $user, Team $team): bool
     {
-        if ($user->hasRole('admin')) {
+        if ($user->hasAnyRole(['admin', 'manager'])) {
             return true;
         }
 
@@ -54,7 +54,7 @@ class TeamPolicy
 
     public function manageMember(User $user, Team $team): bool
     {
-        if ($user->hasRole('admin')) {
+        if ($user->hasAnyRole(['admin', 'manager'])) {
             return true;
         }
 

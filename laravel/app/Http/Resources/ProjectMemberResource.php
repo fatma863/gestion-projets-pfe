@@ -13,7 +13,7 @@ class ProjectMemberResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
-            'avatar' => $this->avatar,
+            'avatar' => $this->avatar ? asset('storage/' . $this->avatar) : null,
             'project_role' => $this->pivot?->project_role,
         ];
     }

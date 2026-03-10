@@ -13,7 +13,7 @@ class TeamMemberResource extends JsonResource
             'id' => $this->id,
             'name' => $this->name,
             'email' => $this->email,
-            'avatar' => $this->avatar,
+            'avatar' => $this->avatar ? asset('storage/' . $this->avatar) : null,
             'role_in_team' => $this->pivot?->role_in_team,
             'capacity_hours_per_week' => (float) ($this->pivot?->capacity_hours_per_week ?? 40),
             'skills' => json_decode($this->pivot?->skills ?? '[]', true),

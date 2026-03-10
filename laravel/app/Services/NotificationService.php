@@ -6,6 +6,7 @@ use App\Models\Notification;
 use App\Models\Project;
 use App\Models\Task;
 use App\Models\TaskComment;
+use App\Models\Team;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 
@@ -73,20 +74,30 @@ class NotificationService
      */
     public static function projectCreated(Project $project): void
     {
-        if (!$project->team_id) {
-            return;
+        $currentUserId = Auth::id();
+        $recipientIds = [];
+
+        // Notify team members if project is linked to a team
+        if ($project->team_id) {
+            $project->loadMissing('team.members');
+            $recipientIds = $project->team->members->pluck('id')->toArray();
         }
 
-        $project->loadMissing('team.members');
-        $currentUserId = Auth::id();
+        // Notify directly-added project members
+        $project->loadMissing('members');
+        $recipientIds = array_merge($recipientIds, $project->members->pluck('id')->toArray());
 
-        foreach ($project->team->members as $member) {
-            if ($member->id === $currentUserId) {
-                continue;
-            }
+        // Notify the manager
+        if ($project->manager_id) {
+            $recipientIds[] = $project->manager_id;
+        }
 
+        $recipientIds = array_unique($recipientIds);
+        $recipientIds = array_filter($recipientIds, fn ($id) => $id !== $currentUserId);
+
+        foreach ($recipientIds as $userId) {
             Notification::create([
-                'user_id' => $member->id,
+                'user_id' => $userId,
                 'type'    => 'project_created',
                 'title'   => 'Nouveau projet',
                 'message' => "Le projet « {$project->name} » a été créé.",
@@ -180,5 +191,26 @@ class NotificationService
                 ],
             ]);
         }
+    }
+
+    /**
+     * Notify a user that they've been added to a team.
+     */
+    public static function memberAddedToTeam(Team $team, int $userId): void
+    {
+        $currentUserId = Auth::id();
+        if ($userId === $currentUserId) {
+            return;
+        }
+
+        Notification::create([
+            'user_id' => $userId,
+            'type'    => 'team_member_added',
+            'title'   => 'Ajout à une équipe',
+            'message' => "Vous avez été ajouté(e) à l'équipe « {$team->name} ».",
+            'data'    => [
+                'team_id' => $team->id,
+            ],
+        ]);
     }
 }

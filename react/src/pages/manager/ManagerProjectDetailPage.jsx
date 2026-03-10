@@ -101,7 +101,7 @@ export default function ManagerProjectDetailPage() {
             {project.description && <p className="mt-1 text-sm text-muted-foreground">{project.description}</p>}
             {project.manager && (
               <p className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-                <UserCheck className="h-4 w-4" /> Manager : <span className="font-medium text-foreground">{project.manager.name}</span>
+                <Avatar name={project.manager.name} src={project.manager.avatar} size="xs" /> Manager : <span className="font-medium text-foreground">{project.manager.name}</span>
               </p>
             )}
           </div>
@@ -198,13 +198,18 @@ function KanbanCard({ task, onClick }) {
       </div>
       {task.description && <p className="mb-2 line-clamp-2 text-xs text-muted-foreground/80">{task.description}</p>}
       <div className="flex flex-wrap items-center gap-1.5 mb-2">
-        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_COLORS[task.priority] || ''}`}>{task.priority}</span>
+        <span className={`inline-flex rounded-md px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_COLORS[task.priority] || ''}`}>{{ low: 'Basse', medium: 'Moyenne', high: 'Haute', urgent: 'Urgente' }[task.priority] || task.priority}</span>
         {task.is_overdue && <span className="flex items-center gap-0.5 rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600"><AlertTriangle className="h-2.5 w-2.5" /> Retard</span>}
         {task.due_date && !task.is_overdue && <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground"><Calendar className="h-2.5 w-2.5" />{new Date(task.due_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })}</span>}
         {task.comments_count > 0 && <span className="flex items-center gap-0.5 text-[11px] text-muted-foreground"><MessageSquare className="h-2.5 w-2.5" /> {task.comments_count}</span>}
       </div>
       <div className="flex items-center justify-between">
-        {task.assignees?.length > 0 ? <AvatarGroup max={3}>{task.assignees.map((a) => <Avatar key={a.id} name={a.user?.name || a.name} size="xs" />)}</AvatarGroup> : <div />}
+        {task.assignees?.length > 0 ? (
+          <div className="flex items-center gap-1.5 min-w-0">
+            <AvatarGroup max={3}>{task.assignees.map((a) => <Avatar key={a.id} name={a.user?.name || a.name} src={a.user?.avatar || a.avatar} size="xs" />)}</AvatarGroup>
+            <span className="truncate text-[11px] text-muted-foreground">{task.assignees.map((a) => a.user?.name || a.name).join(', ')}</span>
+          </div>
+        ) : <div />}
         {task.progress_percent > 0 && <div className="flex items-center gap-1.5 w-20"><ProgressBar value={task.progress_percent} size="sm" /><span className="text-[10px] font-medium text-muted-foreground">{task.progress_percent}%</span></div>}
       </div>
     </div>
@@ -256,9 +261,9 @@ function MembersTab({ projectId }) {
           <div>
             <label className="mb-1 block text-sm font-medium">Rôle</label>
             <select value={role} onChange={(e) => setRole(e.target.value)} className="flex h-10 rounded-md border border-input bg-white px-3 py-2 text-sm">
-              <option value="manager">Manager</option>
+              <option value="manager">Gestionnaire</option>
               <option value="developer">Développeur</option>
-              <option value="designer">Designer</option>
+              <option value="designer">Concepteur</option>
               <option value="tester">Testeur</option>
               <option value="viewer">Observateur</option>
             </select>
@@ -270,7 +275,7 @@ function MembersTab({ projectId }) {
         {members?.map((m) => (
           <div key={m.id} className="flex items-center justify-between rounded-xl border border-border bg-white p-3 transition-all hover:shadow-sm">
             <div className="flex items-center gap-3">
-              <Avatar name={m.name || m.user?.name} size="sm" />
+              <Avatar name={m.name || m.user?.name} src={m.avatar || m.user?.avatar} size="sm" />
               <div><p className="text-sm font-medium text-foreground">{m.name || m.user?.name}</p><p className="text-xs text-muted-foreground">{m.email || m.user?.email}</p></div>
             </div>
             <div className="flex items-center gap-2">
@@ -299,7 +304,7 @@ function ActivityTab({ projectId }) {
             <div className="absolute -left-[31px] top-1 h-4 w-4 rounded-full border-2 border-background bg-primary" />
             <div className="rounded-lg border border-border bg-card p-3">
               <div className="flex items-center justify-between">
-                <p className="text-sm"><span className="font-medium">{a.user?.name || 'Système'}</span>{' '}<span className="text-muted-foreground">{ACTION_LABELS[a.action] || a.action}</span>{a.properties?.title && <span className="font-medium ml-1">« {a.properties.title} »</span>}</p>
+                <p className="text-sm"><Avatar name={a.user?.name || 'S'} src={a.user?.avatar} size="xs" className="inline-block mr-1 align-text-bottom" /><span className="font-medium">{a.user?.name || 'Système'}</span>{' '}<span className="text-muted-foreground">{ACTION_LABELS[a.action] || a.action}</span>{a.properties?.title && <span className="font-medium ml-1">« {a.properties.title} »</span>}</p>
                 <span className="text-xs text-muted-foreground shrink-0 ml-2">{a.human_time}</span>
               </div>
               {a.action === 'task_moved' && a.properties?.from && <p className="text-xs text-muted-foreground mt-1">{a.properties.from} → {a.properties.to}</p>}
@@ -338,7 +343,7 @@ function WorkloadTab({ projectId }) {
           <Card key={m.user_id} className={m.overloaded ? 'border-red-200' : ''}>
             <CardContent className="p-4">
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2"><Avatar name={m.name} size="sm" /><div><p className="text-sm font-medium">{m.name}</p><p className="text-xs text-muted-foreground">{m.email}</p></div></div>
+                <div className="flex items-center gap-2"><Avatar name={m.name} src={m.avatar} size="sm" /><div><p className="text-sm font-medium">{m.name}</p><p className="text-xs text-muted-foreground">{m.email}</p></div></div>
                 {m.overloaded && <Badge variant="destructive">Surchargé</Badge>}
               </div>
               <ProgressBar value={m.utilization_percent} label="Utilisation" showValue size="md" color={m.utilization_percent > 100 ? 'bg-red-500' : m.utilization_percent > 75 ? 'bg-amber-500' : 'bg-emerald-500'} />
